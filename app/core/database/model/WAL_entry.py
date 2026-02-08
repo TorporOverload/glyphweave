@@ -10,7 +10,7 @@ class WalEntry(Base):
     
     id = Column(Integer, primary_key=True)
     file_reference_id = Column(Integer, ForeignKey('file_reference.id'), nullable=False)
-    operation = Column(String, nullable=False)  # 'replace'
+    operation = Column(String, nullable=False)
     offset = Column(Integer, default=0)
     length = Column(Integer, nullable=False)
     temp_blob_id = Column(String, nullable=False)
@@ -19,4 +19,5 @@ class WalEntry(Base):
     flushed_at = Column(DateTime, nullable=True)
     
     # Relationships
-    file_reference = relationship("FileReference", back_populates="wal_entries")
+    file_reference = relationship("FileReference", back_populates="wal_entries",
+                                  foreign_keys=[file_reference_id])

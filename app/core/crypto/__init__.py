@@ -9,7 +9,7 @@ A modular cryptographic system with:
 - Secure memory handling utilities
 """
 
-# High-level services
+# High-level service
 # Utilities
 from app.core.crypto.services.encryption_service import EncryptionService
 from app.core.crypto.services.key_service import KeyService

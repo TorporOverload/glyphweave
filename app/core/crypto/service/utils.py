@@ -24,12 +24,12 @@ def compute_hash(file_path: Path) -> str:
     return digest
 
 
-def generate_vault_id() -> str:
-    """Ccreates a random vault id based on uuid4"""
-    logger.info("Generating new vault id")
-    vault_id = str(uuid.uuid4())
-    logger.debug(f"Generated vault id: {vault_id}")
-    return vault_id
+def generate_id() -> str:
+    """Ccreates a random id based on uuid4"""
+    logger.info("Generating random id")
+    rand_id = str(uuid.uuid4())
+    logger.debug(f"Generated id: {rand_id}")
+    return rand_id
 
 
 def save_vault_key(vault_key: VaultKeyFile, vault_path: Path):

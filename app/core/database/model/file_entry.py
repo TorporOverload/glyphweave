@@ -9,7 +9,7 @@ class FileEntry(Base):
     __tablename__ = 'file_entry'
     
     id = Column(Integer, primary_key=True)
-    file_id = Column(String, unique=True, nullable=False)  # UUID for encryption AAD
+    file_id = Column(String, unique=True, nullable=False)  # UUID
     content_hash = Column(String, unique=True, nullable=False)  # SHA256 for dedup
     mime_type = Column(String, nullable=False)
     encrypted_size_bytes = Column(Integer, nullable=False)
