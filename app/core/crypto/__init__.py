@@ -10,10 +10,14 @@ A modular cryptographic system with:
 """
 
 # High-level service
-# Utilities
-from app.core.crypto.services.encryption_service import EncryptionService
-from app.core.crypto.services.key_service import KeyService
-from app.core.crypto.services.recovery_service import RecoveryService
+from app.core.crypto.service.encryption_service import EncryptionService
+from app.core.crypto.service.key_service import KeyService
+from app.core.crypto.service.utils import (
+    generate_id,
+    save_vault_key,
+    compute_hash,
+    load_vault_key   
+)
 
 # Data types
 from app.core.crypto.types import KDFParams, KeyPurpose, VaultKeyFile, WrappedKey
@@ -22,7 +26,10 @@ __all__ = [
     # Services
     "EncryptionService",
     "KeyService",
-    "RecoveryService",
+    "generate_id",
+    'save_vault_key',
+    "compute_hash",
+    "load_vault_key",
     # Types
     "KDFParams",
     "WrappedKey",
