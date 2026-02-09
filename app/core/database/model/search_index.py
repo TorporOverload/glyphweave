@@ -1,6 +1,6 @@
 """FQLite fts virtual table and triggers"""
 
-from sqlalchemy import DDL, Result, event, text
+from sqlalchemy import DDL, event, text
 from sqlalchemy.orm import Session
 
 from app.core.database.base import Base
@@ -38,7 +38,7 @@ CREATE TRIGGER IF NOT EXISTS trigger_file_entry_content_changed
 
 def insert_document_content(
     session: Session, file_entry_id: str, content: str
-) -> Result:
+) -> object:
     """Insert document content into the search index"""
     statement = text("""
         INSERT INTO search_index (file_entry_id, content)
