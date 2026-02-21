@@ -75,15 +75,20 @@ class VaultKeyFile:
     check_nonce: bytes
     check_value: bytes  # Encrypted CHECK_PLAINTEXT for password verification 
     vault_id: str
+    recovery_key_wrapped: bytes
 
     def to_dict(self) -> dict:
-        return {
+        data = {
             "vault_id": self.vault_id,
             "password_wrapped": self.password_wrapped.to_dict(),
             "recovery_wrapped": self.recovery_wrapped.to_dict(),
             "check_nonce": base64.b64encode(self.check_nonce).decode("ascii"),
             "check_value": base64.b64encode(self.check_value).decode("ascii"),
         }
+        data["recovery_key_wrapped"] = base64.b64encode(
+            self.recovery_key_wrapped
+        ).decode("ascii")
+        return data
 
     @classmethod
     def from_dict(cls, data: dict) -> "VaultKeyFile":
@@ -92,7 +97,8 @@ class VaultKeyFile:
             password_wrapped=WrappedKey.from_dict(data["password_wrapped"]),
             recovery_wrapped=WrappedKey.from_dict(data["recovery_wrapped"]),
             check_nonce=base64.b64decode(data["check_nonce"]),
-            check_value=base64.b64decode(data["check_value"])            
+            check_value=base64.b64decode(data["check_value"]),
+            recovery_key_wrapped=base64.b64decode(data["recovery_key_wrapped"]),
         )
 
 class KeyPurpose(Enum):

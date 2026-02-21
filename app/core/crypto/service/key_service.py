@@ -120,6 +120,8 @@ class KeyService:
         """
         Wrap a recovery key using KEK derived from the recovery phrase.
         Stores the result in self.vault_key_file.recovery_wrapped.
+        Also stores a master-key-wrapped recovery key in vault.key for
+        password-based retrieval.
 
         Args:
             recovery_phrase: The BIP39 recovery phrase.
@@ -128,7 +130,7 @@ class KeyService:
 
         logger.debug("Wrapping master key with recovery phrase.")
 
-        # Derive KEK from recovery phrase
+        # Derive recovery key from recovery phrase
         recovery_seed = Mnemonic("english").to_seed(recovery_phrase)[:32]
         kek_recovery, salt = derive_kek_from_password(recovery_seed.hex(), kdf_params)
 
@@ -142,6 +144,10 @@ class KeyService:
         # Store in vault_key_file
         self.vault_key_file.recovery_wrapped = WrappedKey(
             ciphertext=wrapped_key, salt=salt, kdf_params=kdf_params
+        )
+        # Also wrap the recovery key with the master key for password-based access
+        self.vault_key_file.recovery_key_wrapped = wrap_key(
+            self.master_key.get(), recovery_seed
         )
 
         logger.debug("Master key wrapped with recovery phrase successfully.")
@@ -180,6 +186,27 @@ class KeyService:
         except Exception as e:
             logger.error(f"Failed to recover key from phrase: {e}")
             raise ValueError(f"Failed to recover key from phrase: {e}") from e
+
+    def unwrap_recovery_key_with_master(self) -> bytes:
+        """
+        Unwrap the recovery key using the already-unwrapped master key.
+
+        Intended flow: password -> unwrap_master_key() ->
+        unwrap_recovery_key_with_master()
+
+        Returns:
+            bytes: Raw recovery key (32 bytes).
+        """
+        if not self.master_key:
+            logger.error("Master key is not initialized.")
+            raise ValueError("Master key is not initialized.")
+        if not self.vault_key_file.recovery_key_wrapped:
+            logger.error("Recovery key is not available in vault_key_file.")
+            raise ValueError("Recovery key is not available in vault_key_file.")
+
+        return unwrap_key(
+            self.master_key.get(), self.vault_key_file.recovery_key_wrapped
+        )
 
     def derive_database_key(self) -> str:
         """Derives the vault db key for sqlcipher database.
