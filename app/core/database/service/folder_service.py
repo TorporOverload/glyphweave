@@ -1,8 +1,9 @@
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, sessionmaker
 
 from app.core.database.model.file_reference import FileReference
 from app.core.database.service.gc_service import GarbageCollector
@@ -12,10 +13,25 @@ from app.utils.logging import logger
 class FolderService:
     """DB operations for the vault folder tree."""
 
-    def __init__(self, session: Session, vault_path: Path):
-        self.session = session
+    def __init__(self, session_factory: sessionmaker, vault_path: Path):
+        self._session_factory = session_factory
         self.vault_path = vault_path
-        self.gc = GarbageCollector(session, vault_path)
+        self.gc = GarbageCollector(session_factory, vault_path)
+
+    @contextmanager
+    def _session_scope(self, *, commit: bool = True):
+        """Provide a transactional scope around a series of operations."""
+        session: Session = self._session_factory()
+        session.expire_on_commit = False
+        try:
+            yield session
+            if commit:
+                session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
 
     def create_folder(
         self,
@@ -32,46 +48,50 @@ class FolderService:
         Returns:
             The created FileReference (is_folder=True)
         """
-        folder = FileReference(
-            name=name,
-            parent_id=parent_id,
-            is_folder=True,
-            file_entry_id=None,
-        )
-        self.session.add(folder)
-        self.session.flush()  # Get the ID without committing
+        with self._session_scope() as session:
+            folder = FileReference(
+                name=name,
+                parent_id=parent_id,
+                is_folder=True,
+                file_entry_id=None,
+            )
+            session.add(folder)
+            session.flush()  # Get the ID without committing
 
-        logger.debug(f"Created folder: {folder.virtual_path} (id={folder.id})")
-        return folder
+            logger.debug(f"Created folder: {folder.virtual_path} (id={folder.id})")
+            return folder
 
     def get_by_id(self, ref_id: int) -> Optional[FileReference]:
         """Get a FileReference by ID with eager-loaded relationships."""
-        return (
-            self.session.query(FileReference)
-            .options(joinedload(FileReference.file_entry))
-            .filter(FileReference.id == ref_id)
-            .first()
-        )
+        with self._session_scope(commit=False) as session:
+            return (
+                session.query(FileReference)
+                .options(joinedload(FileReference.file_entry))
+                .filter(FileReference.id == ref_id)
+                .first()
+            )
 
     def get_by_virtual_path(self, virtual_path: str) -> Optional[FileReference]:
         """Look up a FileReference by its virtual path."""
-        return (
-            self.session.query(FileReference)
-            .filter(FileReference.virtual_path == virtual_path)
-            .first()
-        )
+        with self._session_scope(commit=False) as session:
+            return (
+                session.query(FileReference)
+                .filter(FileReference.virtual_path == virtual_path)
+                .first()
+            )
 
     def get_folder_id_by_path(self, virtual_path: str) -> Optional[int]:
         """Get the ID of a folder by its virtual path. Returns None if not found."""
-        ref = (
-            self.session.query(FileReference.id)
-            .filter(
-                FileReference.virtual_path == virtual_path,
-                FileReference.is_folder.is_(True),
+        with self._session_scope(commit=False) as session:
+            ref = (
+                session.query(FileReference.id)
+                .filter(
+                    FileReference.virtual_path == virtual_path,
+                    FileReference.is_folder.is_(True),
+                )
+                .first()
             )
-            .first()
-        )
-        return ref[0] if ref else None
+            return ref[0] if ref else None
 
     def rename_entry(
         self,
@@ -87,15 +107,16 @@ class FolderService:
             new_name: New name
             new_parent_id: New parent folder ID (None for root)
         """
-        ref = self.session.query(FileReference).get(ref_id)
-        if not ref:
-            raise FileNotFoundError(f"FileReference {ref_id} not found")
+        with self._session_scope() as session:
+            ref = session.get(FileReference, ref_id)
+            if not ref:
+                raise FileNotFoundError(f"FileReference {ref_id} not found")
 
-        ref.name = new_name
-        ref.parent_id = new_parent_id
+            ref.name = new_name
+            ref.parent_id = new_parent_id
 
-        self.session.flush()
-        logger.debug(f"""Renamed FileReference {ref_id} to {new_name} -
+            session.flush()
+            logger.debug(f"""Renamed FileReference {ref_id} to {new_name} -
             new file path {ref.virtual_path}""")
 
     def delete_entry(self, ref_id: int, commit: bool = False) -> List[int]:
@@ -113,48 +134,45 @@ class FolderService:
             A list of potentially orphaned FileEntry IDs that should be
             passed to the garbage collector in a batch.
         """
-        ref = self.session.query(FileReference).get(ref_id)
-        if not ref:
-            return []
+        with self._session_scope(commit=True) as session:
+            ref = session.get(FileReference, ref_id)
+            if not ref:
+                return []
 
-        orphaned_entry_ids: set[int] = set()
-        virtual_path = ref.virtual_path
+            orphaned_entry_ids: set[int] = set()
+            virtual_path = ref.virtual_path
 
-        if ref.is_folder:
-            # Get all descendants (files and folders) under this folder
-            descendants = (
-                self.session.query(FileReference)
-                .filter(FileReference.virtual_path.like(virtual_path + "/%"))
-                .all()
-            )
+            if ref.is_folder:
+                # Get all descendants (files and folders) under this folder
+                descendants = (
+                    session.query(FileReference)
+                    .filter(FileReference.virtual_path.like(virtual_path + "/%"))
+                    .all()
+                )
 
-            # Collect file_entry_ids from files and delete descendants
-            for desc in descendants:
-                if desc.file_entry_id is not None:
-                    orphaned_entry_ids.add(desc.file_entry_id)
-                self.session.delete(desc)
+                # Collect file_entry_ids from files and delete descendants
+                for desc in descendants:
+                    if desc.file_entry_id is not None:
+                        orphaned_entry_ids.add(desc.file_entry_id)
+                    session.delete(desc)
 
-        # Collect this entry's file_entry_id if it's a file
-        if ref.file_entry_id is not None:
-            orphaned_entry_ids.add(ref.file_entry_id)
+            # Collect this entry's file_entry_id if it's a file
+            if ref.file_entry_id is not None:
+                orphaned_entry_ids.add(ref.file_entry_id)
 
-        # Delete the entry itself
-        self.session.delete(ref)
-        self.session.flush()
+            # Delete the entry itself
+            session.delete(ref)
+            session.flush()
 
-        logger.debug(f"Deleted entry: {virtual_path}")
+            logger.debug(f"Deleted entry: {virtual_path}")
 
-        # Optionally commit deletions so callers can run GC deterministically
-        if commit:
-            self.session.commit()
-
-        # Return deduplicated list of potentially orphaned FileEntry IDs
-        return list(orphaned_entry_ids)
-
+            # Return deduplicated list of potentially orphaned FileEntry IDs
+            return list(orphaned_entry_ids)
 
     def update_accessed_at(self, ref_id: int) -> None:
         """Update the accessed_at timestamp for a file reference."""
-        ref = self.session.query(FileReference).get(ref_id)
-        if ref:
-            ref.accessed_at = datetime.now(timezone.utc)
-            self.session.flush()
+        with self._session_scope() as session:
+            ref = session.get(FileReference, ref_id)
+            if ref:
+                ref.accessed_at = datetime.now(timezone.utc)
+                session.flush()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
 
 import sqlcipher3
@@ -9,7 +10,7 @@ from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from app.config import GLYPHWEAVE_LOCAL_DIR
 from app.utils.logging import logger
 
-DB_FILENAME = "glyphweave.db"
+DB_FILENAME = "vault.db"
 
 engine = None
 
@@ -35,8 +36,9 @@ class DbBase:
         @event.listens_for(self.engine, "connect")
         def _set_pragma_key(dbapi_conn, connection_record):
             cursor = dbapi_conn.cursor()
-            cursor.execute(f"PRAGMA key = \"x'{self.db_key}'\"")
-            cursor.execute("PRAGMA journal_mode=WAL;")
+            pragma_sql = f"PRAGMA key = \"x'{self.db_key}'\""
+            cursor.execute(pragma_sql)
+            cursor.execute("PRAGMA journal_mode=WAL")
             cursor.execute("PRAGMA foreign_keys = ON")
             cursor.close()
 
@@ -60,9 +62,9 @@ class DbBase:
 
     @staticmethod
     def create_db_engine(vault_id: str):
-        vault_dir = Path(GLYPHWEAVE_LOCAL_DIR) / vault_id
-        vault_dir.mkdir(parents=True, exist_ok=True)
-        db_path = str(vault_dir / DB_FILENAME)
+        db_dir = Path(GLYPHWEAVE_LOCAL_DIR) / vault_id / "database"
+        db_dir.mkdir(parents=True, exist_ok=True)
+        db_path = str(db_dir / DB_FILENAME)
 
         engine = create_engine(
             f"sqlite:///{db_path}",
@@ -75,3 +77,21 @@ class DbBase:
 
     def get_session(self):
         return self.SessionLocal()
+
+    @contextmanager
+    def session_scope(self):
+        """Provide a transactional scope around a series of operations.
+
+        Yields a fresh session that auto-commits on success and
+        auto-rolls-back on error. The session is always closed on exit.
+        This prevents a failed operation from poisoning subsequent ones.
+        """
+        session = self.SessionLocal()
+        try:
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()

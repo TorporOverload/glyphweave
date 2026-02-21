@@ -1,10 +1,10 @@
 """Constants used in crypto module"""
 
 # File encryption thresholds
-CHUNK_SIZE: int = 1024 * 512  # 512KB chunks
-LARGE_FILE_THRESHOLD: int = 5 * 1024 * 1024  #5MB
+CHUNK_SIZE: int = 64 * 1024  # 64KB chunks 
+LARGE_FILE_THRESHOLD: int = 5 * 1024 * 1024  # 5MB
 BLOB_SIZE_MAX = 10 * 1024 * 1024
-FILE_HEADER_SIZE_BYTES = 37 
+FILE_HEADER_SIZE_BYTES = 37
 
 # Chunked format identifiers
 HEADER_AAD: bytes = b"GWHv1"
