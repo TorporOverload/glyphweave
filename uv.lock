@@ -139,6 +139,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
+    { name = "kreuzberg" },
     { name = "mfusepy" },
     { name = "mnemonic" },
     { name = "openpyxl" },
@@ -159,6 +160,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "cryptography", specifier = ">=46.0.4" },
+    { name = "kreuzberg", specifier = ">=4.4.1" },
     { name = "mfusepy", specifier = ">=3.1.0" },
     { name = "mnemonic", specifier = ">=0.21" },
     { name = "openpyxl", specifier = ">=3.1.5" },
@@ -214,6 +216,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/72/34/14ca021ce8e5dfedc35312d08ba8bf51fdd999c576889fc2c24cb97f4f10/iniconfig-2.3.0.tar.gz", hash = "sha256:c76315c77db068650d49c5b56314774a7804df16fee4402c1f19d6d15d8c4730", size = 20503, upload-time = "2025-10-18T21:55:43.219Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/cb/b1/3846dd7f199d53cb17f49cba7e651e9ce294d8497c8c150530ed11865bb8/iniconfig-2.3.0-py3-none-any.whl", hash = "sha256:f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12", size = 7484, upload-time = "2025-10-18T21:55:41.639Z" },
+]
+
+[[package]]
+name = "kreuzberg"
+version = "4.4.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/75/eb/f6aefbc2ce528fac89053284a8e6bd7ad529a4b7af51c3586784da8c2d70/kreuzberg-4.4.1.tar.gz", hash = "sha256:a3acbbeb23b3f90e0749bababe972397942be460981924dbdb01c68369a0a2ce", size = 1741529, upload-time = "2026-02-28T13:12:25.216Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fa/9f/b13a37c209c6bb06a15879b5b48e59fcea6f0e98d6ce0a2d31ec97a8f5b4/kreuzberg-4.4.1-cp310-abi3-macosx_14_0_arm64.whl", hash = "sha256:c10b3ea21b1a42823a54a633b3cc101837555a0b9b59c57f23143ba6ce8819f9", size = 31642383, upload-time = "2026-02-28T13:12:12.494Z" },
+    { url = "https://files.pythonhosted.org/packages/4a/7d/b84b3aa274c2d7b52b1e5ebe64c68d47d21776fc7f48894f309688e563e2/kreuzberg-4.4.1-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:5aeab6794d162119ef6ae1d239a8d8ea8622b97b097284f4b06c9eb4bd87af6d", size = 35865426, upload-time = "2026-02-28T13:12:15.797Z" },
+    { url = "https://files.pythonhosted.org/packages/19/8f/c7451b30698dd132f9d29132e107fb0d0ea6d7d33aea1f3ecd5f6d686c48/kreuzberg-4.4.1-cp310-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:bf90c2c5dfa30c0da86857ee8fa4a1a96b4490c82cd98028a216d9fc9574986a", size = 34962397, upload-time = "2026-02-28T13:12:19.822Z" },
+    { url = "https://files.pythonhosted.org/packages/00/34/2b2e1ad3235bf9026027e41f550569a99a75691eaf1914aeb4dc8e8d20ca/kreuzberg-4.4.1-cp310-abi3-win_amd64.whl", hash = "sha256:aac0b01717610239b862a0650cf3347da9ebfc4d78994b4135b25c432655dde6", size = 37554234, upload-time = "2026-02-28T13:12:22.893Z" },
 ]
 
 [[package]]

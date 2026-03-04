@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "cryptography>=46.0.4",
+    "kreuzberg>=4.4.1",
     "mfusepy>=3.1.0",
     "mnemonic>=0.21",
     "openpyxl>=3.1.5",

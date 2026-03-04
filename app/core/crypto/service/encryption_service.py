@@ -217,8 +217,14 @@ class EncryptionService:
                         outfile.write(plaintext)
                         chunk_index += 1
 
+        if chunk_index != chunk_count:
+            raise ValueError(
+                "Incomplete encrypted file: "
+                f"expected {chunk_count} chunk(s), got {chunk_index}"
+            )
+
         logger.debug("File decrypted successfully.")
-        
+
     @staticmethod
     def _save_blob(blob_data: bytearray, vault_path: Path) -> str:
         """
@@ -237,5 +243,3 @@ class EncryptionService:
         with open(blob_path, "wb") as blob_file:
             blob_file.write(blob_data)
         return blob_id
-
-

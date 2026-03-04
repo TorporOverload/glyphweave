@@ -5,7 +5,7 @@ from typing import Dict, List, Optional, Set
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.database.model.WAL_entry import WalEntry
-from app.core.fuse.temp_blob_store import TempBlobStore
+from app.core.fuse.temp_store import TempStore
 from app.utils.logging import logger
 
 
@@ -19,7 +19,7 @@ class WalService:
     3. Supporting recovery on crash by replaying unflushed entries
 
     Usage:
-        wal_service = WalService(session_factory, temp_blob_store)
+        wal_service = WalService(session_factory, temp_store)
 
         # Log a write
         entry = wal_service.log_write(
@@ -41,17 +41,17 @@ class WalService:
     def __init__(
         self,
         session_factory: sessionmaker,
-        temp_blob_store: TempBlobStore,
+        temp_store: TempStore,
     ):
         """
         Initialize the WAL service.
 
         Args:
             session_factory: SQLAlchemy session factory for database operations
-            temp_blob_store: For managing encrypted temp blob files
+            temp_store: For managing encrypted temp blob files
         """
         self._session_factory = session_factory
-        self.temp_blob_store = temp_blob_store
+        self.temp_store = temp_store
 
     @contextmanager
     def _session_scope(self, *, commit: bool = True):
@@ -96,7 +96,7 @@ class WalService:
             The created WalEntry
         """
         # Write encrypted temp blob
-        temp_blob_id = self.temp_blob_store.write_temp_blob(
+        temp_blob_id = self.temp_store.write_temp_blob(
             file_id=file_id,
             chunk_index=chunk_index,
             plaintext=data,
@@ -271,7 +271,7 @@ class WalService:
             # Delete temp blobs
             for entry in entries:
                 if entry.temp_blob_id:
-                    self.temp_blob_store.delete_temp_blob(entry.temp_blob_id)
+                    self.temp_store.delete_temp_blob(entry.temp_blob_id)
 
             # Delete entries
             entry_ids = [e.id for e in entries]
@@ -309,7 +309,7 @@ class WalService:
             # Delete temp blobs
             for entry in entries:
                 if entry.temp_blob_id:
-                    self.temp_blob_store.delete_temp_blob(entry.temp_blob_id)
+                    self.temp_store.delete_temp_blob(entry.temp_blob_id)
 
             # Delete entries
             entry_ids = [e.id for e in entries]
@@ -363,7 +363,7 @@ class WalService:
         if not entry.temp_blob_id:
             return None
 
-        return self.temp_blob_store.read_temp_blob(
+        return self.temp_store.read_temp_blob(
             file_id=entry.file_id,
             chunk_index=entry.chunk_index,
             blob_id=entry.temp_blob_id,
@@ -413,7 +413,7 @@ class WalService:
                 .all()
             }
 
-            return self.temp_blob_store.cleanup_orphaned(db_blob_ids)
+            return self.temp_store.cleanup_orphaned(db_blob_ids)
 
     def has_pending_writes(self, file_ref_id: int) -> bool:
         """
