@@ -20,7 +20,8 @@ class WalEntry(Base):
     Lifecycle:
         1. Created on write with flushed=False
         2. Temp blob written to
-                    GLYPHWEAVE_LOCAL_DIR / vault_id / temp /{temp_blob_id}.enc
+                    GLYPHWEAVE_LOCAL_DIR / {vault_id} / cache / temp-blobs /
+                    {temp_blob_id}.enc
         3. On flush: chunk written to final blob, flushed=True
         4. On checkpoint: entry deleted, temp blob deleted
     """
@@ -48,7 +49,7 @@ class WalEntry(Base):
     file_id: Mapped[str] = mapped_column(String, nullable=False)
 
     # Reference to encrypted temp blob:
-    # GLYPHWEAVE_LOCAL_DIR / vault_id / temp /{temp_blob_id}.enc
+    # GLYPHWEAVE_LOCAL_DIR / {vault_id} / cache / temp-blobs / {temp_blob_id}.enc
     temp_blob_id: Mapped[str] = mapped_column(String, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(

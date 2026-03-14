@@ -56,7 +56,7 @@ class KeyService:
             raise ValueError("Master key is not initialized.")
 
         # Wrap master key using AES Key Wrap
-        wrapped_key = wrap_key(kek_password, self.master_key.get())
+        wrapped_key = wrap_key(kek_password, self.master_key.view())
 
         # Store in vault_key_file
         self.vault_key_file.password_wrapped = WrappedKey(
@@ -118,10 +118,8 @@ class KeyService:
 
     def wrap_recovery_key(self, recovery_phrase: str, kdf_params: KDFParams) -> None:
         """
-        Wrap a recovery key using KEK derived from the recovery phrase.
+        Wrap the master key using a KEK derived from the recovery phrase.
         Stores the result in self.vault_key_file.recovery_wrapped.
-        Also stores a master-key-wrapped recovery key in vault.key for
-        password-based retrieval.
 
         Args:
             recovery_phrase: The BIP39 recovery phrase.
@@ -139,15 +137,11 @@ class KeyService:
             raise ValueError("Master key is not initialized.")
 
         # Wrap master key using AES Key Wrap
-        wrapped_key = wrap_key(kek_recovery, self.master_key.get())
+        wrapped_key = wrap_key(kek_recovery, self.master_key.view())
 
         # Store in vault_key_file
         self.vault_key_file.recovery_wrapped = WrappedKey(
             ciphertext=wrapped_key, salt=salt, kdf_params=kdf_params
-        )
-        # Also wrap the recovery key with the master key for password-based access
-        self.vault_key_file.recovery_key_wrapped = wrap_key(
-            self.master_key.get(), recovery_seed
         )
 
         logger.debug("Master key wrapped with recovery phrase successfully.")
@@ -187,26 +181,28 @@ class KeyService:
             logger.error(f"Failed to recover key from phrase: {e}")
             raise ValueError(f"Failed to recover key from phrase: {e}") from e
 
-    def unwrap_recovery_key_with_master(self) -> bytes:
-        """
-        Unwrap the recovery key using the already-unwrapped master key.
-
-        Intended flow: password -> unwrap_master_key() ->
-        unwrap_recovery_key_with_master()
-
-        Returns:
-            bytes: Raw recovery key (32 bytes).
-        """
+    def wrap_recovery_phrase_with_master(self, recovery_phrase: str) -> None:
+        """Store a master-key-wrapped copy of the recovery phrase."""
         if not self.master_key:
             logger.error("Master key is not initialized.")
             raise ValueError("Master key is not initialized.")
-        if not self.vault_key_file.recovery_key_wrapped:
-            logger.error("Recovery key is not available in vault_key_file.")
-            raise ValueError("Recovery key is not available in vault_key_file.")
 
-        return unwrap_key(
-            self.master_key.get(), self.vault_key_file.recovery_key_wrapped
+        self.vault_key_file.recovery_phrase_wrapped = wrap_key(
+            self.master_key.view(), recovery_phrase.encode("utf-8")
         )
+
+    def unwrap_recovery_phrase_with_master(self) -> str:
+        """Return the recovery phrase by decrypting it with the master key."""
+        if not self.master_key:
+            logger.error("Master key is not initialized.")
+            raise ValueError("Master key is not initialized.")
+        if not self.vault_key_file.recovery_phrase_wrapped:
+            raise ValueError("Recovery phrase is not available for this vault")
+
+        phrase_bytes = unwrap_key(
+            self.master_key.view(), self.vault_key_file.recovery_phrase_wrapped
+        )
+        return phrase_bytes.decode("utf-8")
 
     def derive_database_key(self) -> str:
         """Derives the vault db key for sqlcipher database.
@@ -218,7 +214,7 @@ class KeyService:
             raise ValueError("Master key is not initialized.")
 
         db_key = derive_subkey(
-            self.master_key.get(),
+            self.master_key.view(),
             self.vault_key_file.vault_id.encode("utf-8"),
             KeyPurpose.DATABASE,
             "vault_db_master_key",
@@ -241,7 +237,7 @@ class KeyService:
             raise ValueError("Master key is not initialized.")
 
         file_key = derive_subkey(
-            self.master_key.get(),
+            self.master_key.view(),
             self.vault_key_file.vault_id.encode("utf-8"),
             purpose,
             context,
@@ -254,16 +250,16 @@ class KeyService:
     def validate_recovery_phrase(phrase: str) -> bool:
         """
         Validate a recovery format.
-        
+
         Args:
             phrase: The recovery phrase to validate
-            
+
         Returns: True if valid, False otherwise
         """
         logger.debug("Validating recovery phrase format.")
         try:
             words = phrase.strip().split()
-            
+
             if len(words) != 24:
                 logger.warning(f"Invalid recovery phrase word count: {len(words)}")
                 return False

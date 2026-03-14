@@ -1,12 +1,12 @@
-from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
-from sqlalchemy.orm import Session, joinedload, sessionmaker
+from sqlalchemy.orm import joinedload, sessionmaker
 
 from app.core.database.model.file_reference import FileReference
 from app.core.database.service.gc_service import GarbageCollector
+from app.core.database.service.session import session_scope
 from app.utils.logging import logger
 
 
@@ -18,20 +18,25 @@ class FolderService:
         self.vault_path = vault_path
         self.gc = GarbageCollector(session_factory, vault_path)
 
-    @contextmanager
-    def _session_scope(self, *, commit: bool = True):
-        """Provide a transactional scope around a series of operations."""
-        session: Session = self._session_factory()
-        session.expire_on_commit = False
-        try:
-            yield session
-            if commit:
-                session.commit()
-        except Exception:
-            session.rollback()
-            raise
-        finally:
-            session.close()
+    def get_root_entries(self) -> List[FileReference]:
+        """Get files and folders at the root of the vault."""
+        with session_scope(self._session_factory, commit=False) as session:
+            return (
+                session.query(FileReference)
+                .options(joinedload(FileReference.file_entry))
+                .filter(FileReference.parent_id.is_(None))
+                .all()
+            )
+
+    def get_children(self, parent_id: int) -> List[FileReference]:
+        """Get direct children for a folder."""
+        with session_scope(self._session_factory, commit=False) as session:
+            return (
+                session.query(FileReference)
+                .options(joinedload(FileReference.file_entry))
+                .filter(FileReference.parent_id == parent_id)
+                .all()
+            )
 
     def create_folder(
         self,
@@ -48,10 +53,20 @@ class FolderService:
         Returns:
             The created FileReference (is_folder=True)
         """
-        with self._session_scope() as session:
+        with session_scope(self._session_factory) as session:
+            parent_ref = None
+            if parent_id is not None:
+                parent_ref = session.get(FileReference, parent_id)
+                if parent_ref is None:
+                    raise FileNotFoundError(f"Parent folder {parent_id} not found")
+                if not parent_ref.is_folder:
+                    raise NotADirectoryError(
+                        f"Parent reference {parent_id} is not a folder"
+                    )
+
             folder = FileReference(
                 name=name,
-                parent_id=parent_id,
+                parent=parent_ref,
                 is_folder=True,
                 file_entry_id=None,
             )
@@ -63,7 +78,7 @@ class FolderService:
 
     def get_by_id(self, ref_id: int) -> Optional[FileReference]:
         """Get a FileReference by ID with eager-loaded relationships."""
-        with self._session_scope(commit=False) as session:
+        with session_scope(self._session_factory, commit=False) as session:
             return (
                 session.query(FileReference)
                 .options(joinedload(FileReference.file_entry))
@@ -71,18 +86,45 @@ class FolderService:
                 .first()
             )
 
+    def get_vault_tree(self) -> List[FileReference]:
+        """Get the entire vault tree."""
+        with session_scope(self._session_factory, commit=False) as session:
+            return (
+                session.query(FileReference)
+                .options(joinedload(FileReference.file_entry))
+                .order_by(FileReference.parent_id.asc().nullsfirst())
+                .all()
+            )
+
     def get_by_virtual_path(self, virtual_path: str) -> Optional[FileReference]:
         """Look up a FileReference by its virtual path."""
-        with self._session_scope(commit=False) as session:
+        with session_scope(self._session_factory, commit=False) as session:
             return (
                 session.query(FileReference)
                 .filter(FileReference.virtual_path == virtual_path)
                 .first()
             )
 
+    def get_child_by_name(
+        self,
+        parent_id: Optional[int],
+        name: str,
+    ) -> Optional[FileReference]:
+        """Find a direct child in the tree by parent and name."""
+        with session_scope(self._session_factory, commit=False) as session:
+            return (
+                session.query(FileReference)
+                .options(joinedload(FileReference.file_entry))
+                .filter(
+                    FileReference.parent_id == parent_id,
+                    FileReference.name == name,
+                )
+                .first()
+            )
+
     def get_folder_id_by_path(self, virtual_path: str) -> Optional[int]:
         """Get the ID of a folder by its virtual path. Returns None if not found."""
-        with self._session_scope(commit=False) as session:
+        with session_scope(self._session_factory, commit=False) as session:
             ref = (
                 session.query(FileReference.id)
                 .filter(
@@ -107,7 +149,7 @@ class FolderService:
             new_name: New name
             new_parent_id: New parent folder ID (None for root)
         """
-        with self._session_scope() as session:
+        with session_scope(self._session_factory) as session:
             ref = session.get(FileReference, ref_id)
             if not ref:
                 raise FileNotFoundError(f"FileReference {ref_id} not found")
@@ -119,7 +161,7 @@ class FolderService:
             logger.debug(f"""Renamed FileReference {ref_id} to {new_name} -
             new file path {ref.virtual_path}""")
 
-    def delete_entry(self, ref_id: int, commit: bool = False) -> List[int]:
+    def delete_entry(self, ref_id: int) -> List[int]:
         """
         Delete a FileReference entry. For folders, recursively deletes
         all children (files and subfolders). Collects file_entry_ids that
@@ -127,14 +169,12 @@ class FolderService:
 
         Args:
             ref_id: The FileReference to delete
-            commit: If True, commit the DB transaction after deletions so
-                    subsequent GC runs see the final state.
 
         Returns:
             A list of potentially orphaned FileEntry IDs that should be
             passed to the garbage collector in a batch.
         """
-        with self._session_scope(commit=True) as session:
+        with session_scope(self._session_factory) as session:
             ref = session.get(FileReference, ref_id)
             if not ref:
                 return []
@@ -171,7 +211,7 @@ class FolderService:
 
     def update_accessed_at(self, ref_id: int) -> None:
         """Update the accessed_at timestamp for a file reference."""
-        with self._session_scope() as session:
+        with session_scope(self._session_factory) as session:
             ref = session.get(FileReference, ref_id)
             if ref:
                 ref.accessed_at = datetime.now(timezone.utc)

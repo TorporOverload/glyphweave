@@ -40,3 +40,7 @@ include = ["app/**/*.py"]
 [tool.ruff.lint]
 select = ["E", "F", "S"]
 ignore = ["S101"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["_tmp", "test_runs_tmp", ".pytest_tmp", ".pytest_tmp_run1"]

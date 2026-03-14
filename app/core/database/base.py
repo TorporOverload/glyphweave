@@ -7,7 +7,7 @@ import sqlcipher3
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
-from app.config import GLYPHWEAVE_LOCAL_DIR
+from app.config import get_vaults_data_dir
 from app.utils.logging import logger
 
 DB_FILENAME = "vault.db"
@@ -28,9 +28,16 @@ from app.core.database.model.WAL_entry import WalEntry  # noqa: F401, E402
 
 class DbBase:
     """SQLCipher configuration."""
-    def __init__(self, vault_id: str, db_key: str):
+
+    def __init__(
+        self,
+        vault_id: str,
+        db_key: str,
+        vaults_data_dir: Path | None = None,
+    ):
         self.db_key = db_key
-        self.engine = self.create_db_engine(vault_id)
+        self.vaults_data_dir = Path(vaults_data_dir or get_vaults_data_dir())
+        self.engine = self.create_db_engine(vault_id, self.vaults_data_dir)
 
         # Set up event listener to apply PRAGMA key on every connection
         @event.listens_for(self.engine, "connect")
@@ -61,8 +68,9 @@ class DbBase:
             raise
 
     @staticmethod
-    def create_db_engine(vault_id: str):
-        db_dir = Path(GLYPHWEAVE_LOCAL_DIR) / vault_id / "database"
+    def create_db_engine(vault_id: str, vaults_data_dir: Path):
+        """Create and return a SQLCipher engine for the given vault."""
+        db_dir = vaults_data_dir / vault_id
         db_dir.mkdir(parents=True, exist_ok=True)
         db_path = str(db_dir / DB_FILENAME)
 
@@ -76,6 +84,7 @@ class DbBase:
         return engine
 
     def get_session(self):
+        """Return a new database session."""
         return self.SessionLocal()
 
     @contextmanager

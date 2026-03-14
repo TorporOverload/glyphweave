@@ -11,6 +11,7 @@ from app.core.crypto.constants import (
 from app.core.crypto.primitives.aes_gcm import AESGCMCipher
 from app.core.crypto.types import KeyPurpose
 from app.core.crypto.primitives.key_derivation import derive_subkey
+from app.core.vault_layout import resolve_blob_path, writable_blobs_dir
 
 
 class TestEncryptionService:
@@ -59,7 +60,7 @@ class TestEncryptionService:
         assert len(blob_ids) == 1
 
         # Verify blob exists
-        assert (vault_path / blob_ids[0]).exists()
+        assert resolve_blob_path(vault_path, blob_ids[0]).exists()
 
         # Decrypt
         output_file = tmp_path / "output.txt"
@@ -129,7 +130,9 @@ class TestEncryptionService:
         encrypted_header = cipher.encrypt_header(raw_header, file_id)
 
         # Write blob
-        (vault_path / blob_id).write_bytes(encrypted_header + b"some data")
+        writable_blobs_dir(vault_path)
+        resolve_blob_path(vault_path, blob_id).write_bytes(encrypted_header +
+            b"some data")
 
         with pytest.raises(ValueError, match="Invalid magic bytes"):
             service.decrypt_file(
@@ -146,7 +149,7 @@ class TestEncryptionService:
             input_file, vault_path, master_key, vault_id, file_id
         )
 
-        blob_path = vault_path / blob_ids[0]
+        blob_path = resolve_blob_path(vault_path, blob_ids[0])
         blob_data = bytearray(blob_path.read_bytes())
 
         # Tamper with the last byte of the encrypted data
@@ -184,7 +187,7 @@ class TestEncryptionService:
         )
         assert len(blob_ids) == 1
 
-        blob_path = vault_path / blob_ids[0]
+        blob_path = resolve_blob_path(vault_path, blob_ids[0])
         blob_data = blob_path.read_bytes()
 
         first_chunk_size = 12 + CHUNK_SIZE + 16

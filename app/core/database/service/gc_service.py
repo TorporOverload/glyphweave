@@ -1,4 +1,3 @@
-from contextlib import contextmanager
 from pathlib import Path
 
 from sqlalchemy import bindparam, delete, select, text
@@ -6,6 +5,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.database.model.file_blob_reference import FileBlobReference
 from app.core.database.model.file_entry import FileEntry
+from app.core.database.service.session import session_scope
+from app.core.vault_layout import writable_blobs_dir
 from app.utils.logging import logger
 
 
@@ -14,22 +15,7 @@ class GarbageCollector:
 
     def __init__(self, session_factory: sessionmaker, vault_path: Path):
         self._session_factory = session_factory
-        self.vault_file_path = vault_path / "files"
-
-    @contextmanager
-    def _session_scope(self, *, commit: bool = True):
-        """Provide a transactional scope around a series of operations."""
-        session: Session = self._session_factory()
-        session.expire_on_commit = False
-        try:
-            yield session
-            if commit:
-                session.commit()
-        except Exception:
-            session.rollback()
-            raise
-        finally:
-            session.close()
+        self.vault_file_path = writable_blobs_dir(vault_path)
 
     def cleanup_orphaned_entry(self, entry_id: int) -> bool:
         """
@@ -46,7 +32,7 @@ class GarbageCollector:
         """
         from app.core.database.model.file_reference import FileReference
 
-        with self._session_scope() as session:
+        with session_scope(self._session_factory) as session:
             # Check if still referenced
             ref_count = (
                 session.query(FileReference)
@@ -70,7 +56,7 @@ class GarbageCollector:
         if not orphan_ids:
             return 0
 
-        with self._session_scope() as session:
+        with session_scope(self._session_factory) as session:
             return self._cleanup_batch_in_session(session, orphan_ids)
 
     def _cleanup_batch_in_session(self, session: Session, orphan_ids: list[int]) -> int:
@@ -118,7 +104,7 @@ class GarbageCollector:
 
         session.flush()
 
-        # 4. Cleanup Disk (OS operations are the bottleneck)
+        # 4. Cleanup Disk
         deleted_count = 0
         for blob_id in blob_ids:
             blob_path = self.vault_file_path / blob_id
@@ -138,7 +124,7 @@ class GarbageCollector:
         """Perform a full garbage collection sweep."""
         logger.info("Starting full GC sweep")
 
-        with self._session_scope() as session:
+        with session_scope(self._session_factory) as session:
             stmt = text("""
                 SELECT fe.id FROM file_entry fe
                 WHERE NOT EXISTS (

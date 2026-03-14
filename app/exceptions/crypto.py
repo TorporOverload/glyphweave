@@ -35,3 +35,9 @@ class InvalidPasswordError(CryptoError):
     """Raised when the password or recovery key is invalid."""
 
     pass
+
+
+class SecureMemoryError(CryptoError):
+    """Raised when secure in-memory storage cannot be established."""
+
+    pass

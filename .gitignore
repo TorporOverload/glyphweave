@@ -42,6 +42,7 @@ htmlcov/
 # Debug logs
 glyphweave_debug.log
 *.log
+/docs
 
 # Local data
 .glyphweave/
@@ -58,3 +59,5 @@ Thumbs.db
 
 test_files/
 test_data/
+test_runs_tmp/
+test/

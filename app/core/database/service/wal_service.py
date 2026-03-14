@@ -1,10 +1,10 @@
-from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set
 
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker
 
 from app.core.database.model.WAL_entry import WalEntry
+from app.core.database.service.session import session_scope
 from app.core.fuse.temp_store import TempStore
 from app.utils.logging import logger
 
@@ -53,21 +53,6 @@ class WalService:
         self._session_factory = session_factory
         self.temp_store = temp_store
 
-    @contextmanager
-    def _session_scope(self, *, commit: bool = True):
-        """Provide a transactional scope around a series of operations."""
-        session: Session = self._session_factory()
-        session.expire_on_commit = False
-        try:
-            yield session
-            if commit:
-                session.commit()
-        except Exception:
-            session.rollback()
-            raise
-        finally:
-            session.close()
-
     def log_write(
         self,
         file_ref_id: int,
@@ -102,7 +87,7 @@ class WalService:
             plaintext=data,
         )
 
-        with self._session_scope() as session:
+        with session_scope(self._session_factory) as session:
             # Create WalEntry
             entry = WalEntry(
                 file_reference_id=file_ref_id,
@@ -142,7 +127,7 @@ class WalService:
         Returns:
             The created WalEntry
         """
-        with self._session_scope() as session:
+        with session_scope(self._session_factory) as session:
             entry = WalEntry(
                 file_reference_id=file_ref_id,
                 operation="truncate",
@@ -176,7 +161,7 @@ class WalService:
         Returns:
             List of unflushed WalEntry records, ordered by id
         """
-        with self._session_scope(commit=False) as session:
+        with session_scope(self._session_factory, commit=False) as session:
             return (
                 session.query(WalEntry)
                 .filter(
@@ -199,7 +184,7 @@ class WalService:
         Returns:
             Set of chunk indices with unflushed write entries
         """
-        with self._session_scope(commit=False) as session:
+        with session_scope(self._session_factory, commit=False) as session:
             entries = (
                 session.query(WalEntry.chunk_index)
                 .filter(
@@ -226,7 +211,7 @@ class WalService:
         if not entry_ids:
             return
 
-        with self._session_scope() as session:
+        with session_scope(self._session_factory) as session:
             now = datetime.now(timezone.utc)
             (
                 session.query(WalEntry)
@@ -254,7 +239,7 @@ class WalService:
         Returns:
             Number of entries deleted
         """
-        with self._session_scope() as session:
+        with session_scope(self._session_factory) as session:
             # Get flushed entries
             entries = (
                 session.query(WalEntry)
@@ -296,12 +281,8 @@ class WalService:
         Returns:
             Total number of entries deleted
         """
-        with self._session_scope() as session:
-            entries = (
-                session.query(WalEntry)
-                .filter(WalEntry.flushed.is_(True))
-                .all()
-            )
+        with session_scope(self._session_factory) as session:
+            entries = session.query(WalEntry).filter(WalEntry.flushed.is_(True)).all()
 
             if not entries:
                 return 0
@@ -332,7 +313,7 @@ class WalService:
         Returns:
             Dict mapping file_reference_id to list of unflushed entries
         """
-        with self._session_scope(commit=False) as session:
+        with session_scope(self._session_factory, commit=False) as session:
             entries = (
                 session.query(WalEntry)
                 .filter(WalEntry.flushed.is_(False))
@@ -403,7 +384,7 @@ class WalService:
         Returns:
             Number of orphaned blobs deleted
         """
-        with self._session_scope(commit=False) as session:
+        with session_scope(self._session_factory, commit=False) as session:
             # Get all blob IDs currently in database
             db_blob_ids = {
                 row[0]
@@ -425,7 +406,7 @@ class WalService:
         Returns:
             True if there are pending writes
         """
-        with self._session_scope(commit=False) as session:
+        with session_scope(self._session_factory, commit=False) as session:
             count = (
                 session.query(WalEntry)
                 .filter(
@@ -438,9 +419,5 @@ class WalService:
 
     def count_pending(self) -> int:
         """Get total count of unflushed WAL entries."""
-        with self._session_scope(commit=False) as session:
-            return (
-                session.query(WalEntry)
-                .filter(WalEntry.flushed.is_(False))
-                .count()
-            )
+        with session_scope(self._session_factory, commit=False) as session:
+            return session.query(WalEntry).filter(WalEntry.flushed.is_(False)).count()

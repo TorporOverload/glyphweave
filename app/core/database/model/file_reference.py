@@ -71,6 +71,8 @@ class FileReference(Base):
 
     @property
     def path(self) -> str:
+        """Return the virtual path, falling back to a computed path for unsaved
+        objects."""
         if self.virtual_path:
             return self.virtual_path
 
@@ -92,6 +94,7 @@ def generate_virtual_path(_mapper, _connection, target: FileReference) -> None:
 
 @event.listens_for(FileReference, "after_update")
 def propagate_path_to_children(mapper, connection, target: FileReference) -> None:
+    """Cascade a folder's virtual path change to all descendant rows."""
     if not target.is_folder:
         return
 

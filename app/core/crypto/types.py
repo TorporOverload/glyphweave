@@ -12,6 +12,8 @@ from app.core.crypto.constants import (
     ARGON2_SALT_SIZE,
 )
 
+KeyMaterial = bytes | bytearray | memoryview
+
 
 @dataclass(frozen=True)
 class KDFParams:
@@ -25,6 +27,7 @@ class KDFParams:
     salt_size: int = ARGON2_SALT_SIZE
 
     def to_dict(self) -> dict:
+        """Serialize KDF parameters to a plain dictionary."""
         return {
             "algorithm": self.algorithm,
             "length": self.length,
@@ -44,6 +47,7 @@ class WrappedKey:
     kdf_params: KDFParams
 
     def to_dict(self) -> dict:
+        """Serialize the wrapped key to a base64-encoded dictionary."""
         return {
             "ciphertext": base64.b64encode(self.ciphertext).decode("ascii"),
             "salt": base64.b64encode(self.salt).decode("ascii"),
@@ -52,6 +56,7 @@ class WrappedKey:
 
     @classmethod
     def from_dict(cls, data: dict) -> "WrappedKey":
+        """Deserialize a WrappedKey from a base64-encoded dictionary."""
         return cls(
             ciphertext=base64.b64decode(data["ciphertext"]),
             salt=base64.b64decode(data["salt"]),
@@ -73,11 +78,12 @@ class VaultKeyFile:
     password_wrapped: WrappedKey
     recovery_wrapped: WrappedKey
     check_nonce: bytes
-    check_value: bytes  # Encrypted CHECK_PLAINTEXT for password verification 
+    check_value: bytes  # Encrypted CHECK_PLAINTEXT for password verification
     vault_id: str
-    recovery_key_wrapped: bytes
+    recovery_phrase_wrapped: bytes
 
     def to_dict(self) -> dict:
+        """Serialize the vault key file to a base64-encoded dictionary."""
         data = {
             "vault_id": self.vault_id,
             "password_wrapped": self.password_wrapped.to_dict(),
@@ -85,20 +91,21 @@ class VaultKeyFile:
             "check_nonce": base64.b64encode(self.check_nonce).decode("ascii"),
             "check_value": base64.b64encode(self.check_value).decode("ascii"),
         }
-        data["recovery_key_wrapped"] = base64.b64encode(
-            self.recovery_key_wrapped
+        data["recovery_phrase_wrapped"] = base64.b64encode(
+            self.recovery_phrase_wrapped
         ).decode("ascii")
         return data
 
     @classmethod
     def from_dict(cls, data: dict) -> "VaultKeyFile":
+        """Deserialize a VaultKeyFile from a base64-encoded dictionary."""
         return cls(
             vault_id=data["vault_id"],
             password_wrapped=WrappedKey.from_dict(data["password_wrapped"]),
             recovery_wrapped=WrappedKey.from_dict(data["recovery_wrapped"]),
             check_nonce=base64.b64decode(data["check_nonce"]),
             check_value=base64.b64decode(data["check_value"]),
-            recovery_key_wrapped=base64.b64decode(data["recovery_key_wrapped"]),
+            recovery_phrase_wrapped=base64.b64decode(data["recovery_phrase_wrapped"]),
         )
 
 class KeyPurpose(Enum):

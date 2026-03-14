@@ -13,7 +13,7 @@ from app.core.crypto.constants import (
     HKDF_INFO_FILE,
     HKDF_INFO_RECOVERY,
 )
-from app.core.crypto.types import KDFParams, KeyPurpose
+from app.core.crypto.types import KDFParams, KeyMaterial, KeyPurpose
 from app.exceptions.crypto import KeyDerivationError
 from app.utils.logging import logger, timed_operation
 
@@ -66,7 +66,7 @@ def derive_kek_from_password(
 
 @timed_operation("derive_subkey")
 def derive_subkey(
-    master_key: bytes, vault_id: bytes, purpose: KeyPurpose, context: str
+    master_key: KeyMaterial, vault_id: bytes, purpose: KeyPurpose, context: str
 ) -> bytes:
     """
     Derive a purpose-specific subkey from a master key using HKDF.

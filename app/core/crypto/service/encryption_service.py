@@ -8,10 +8,12 @@ from app.core.crypto.constants import (
     CHUNKED_MAGIC,
     CHUNKED_VERSION,
     FILE_HEADER_SIZE_BYTES,
+    BLOB_SIZE_MAX
 )
 from app.core.crypto.primitives.aes_gcm import AESGCMCipher
 from app.core.crypto.primitives.key_derivation import derive_subkey
-from app.core.crypto.types import KeyPurpose
+from app.core.crypto.types import KeyMaterial, KeyPurpose
+from app.core.vault_layout import resolve_blob_path, writable_blobs_dir
 from app.utils.logging import logger, timed_operation
 
 
@@ -21,7 +23,7 @@ class EncryptionService:
         self,
         file_path: Path,
         vault_path: Path,
-        master_key: bytes,
+        master_key: KeyMaterial,
         vault_id: bytes,
         file_id: str,
     ) -> list[str]:
@@ -46,6 +48,8 @@ class EncryptionService:
             logger.error(f"File {file_path} not found.")
             raise FileNotFoundError(f"File {file_path} not found.")
 
+        blob_store = writable_blobs_dir(vault_path)
+
         file_size = file_path.stat().st_size
         chunk_count = math.ceil(file_size / CHUNK_SIZE)
 
@@ -55,7 +59,7 @@ class EncryptionService:
 
         blobs = []
         current_blob = bytearray()
-        blob_target_size = 10 * 1024 * 1024  # 10MB
+        blob_target_size = BLOB_SIZE_MAX  # 10MB
 
         chunk_index = 0
 
@@ -90,7 +94,7 @@ class EncryptionService:
                     current_blob
                 ) > len(encrypted_header):
                     # Save current blob and start a new one
-                    blob_id = self._save_blob(current_blob, vault_path)
+                    blob_id = self._save_blob(current_blob, blob_store)
                     blobs.append(blob_id)
                     current_blob = bytearray()
 
@@ -99,7 +103,7 @@ class EncryptionService:
 
         # Save the final blob
         if len(current_blob) > len(encrypted_header):
-            blob_id = self._save_blob(current_blob, vault_path)
+            blob_id = self._save_blob(current_blob, blob_store)
             blobs.append(blob_id)
 
         logger.debug(f"File encrypted successfully into {len(blobs)} blob(s).")
@@ -111,7 +115,7 @@ class EncryptionService:
         vault_path: Path,
         blob_ids: list[str],
         output_path: Path,
-        master_key: bytes,
+        master_key: KeyMaterial,
         vault_id: bytes,
         file_id: str,
     ) -> None:
@@ -142,7 +146,7 @@ class EncryptionService:
 
         with open(output_path, "wb") as outfile:
             for i, blob_id in enumerate(blob_ids):
-                blob_path = vault_path / blob_id
+                blob_path = resolve_blob_path(vault_path, blob_id)
                 if not blob_path.exists():
                     raise FileNotFoundError(f"Blob {blob_id} not found.")
 
@@ -226,20 +230,20 @@ class EncryptionService:
         logger.debug("File decrypted successfully.")
 
     @staticmethod
-    def _save_blob(blob_data: bytearray, vault_path: Path) -> str:
+    def _save_blob(blob_data: bytearray, blob_store: Path) -> str:
         """
         Save blob data to vault and return blob ID.
 
         Args:
             blob_data: The blob data to save
-            vault_path: Path to vault directory
+            blob_store: Path to blob directory
 
         Returns: Blob ID (filename)
         """
         import secrets
 
         blob_id = secrets.token_hex(16) + ".enc"
-        blob_path = vault_path / blob_id
+        blob_path = blob_store / blob_id
         with open(blob_path, "wb") as blob_file:
             blob_file.write(blob_data)
         return blob_id

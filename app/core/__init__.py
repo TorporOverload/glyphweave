@@ -1,1 +1,1 @@
-#TODO
+"""Core application packages."""
