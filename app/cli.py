@@ -109,11 +109,26 @@ def render_vault_menu_lines(vault_name: str | None) -> list[str]:
         "2. Open file",
         "3. List unlocked files",
         "4. Add file",
-        "5. Show recovery phrase",
-        "6. Show DB key (debug)",
-        "7. Exit",
+        "5. Search",
+        "6. Show recovery phrase",
+        "7. Show DB key (debug)",
+        "8. Exit",
         "=" * 40,
     ]
+
+
+def render_search_result_lines(results: Sequence[Any]) -> list[str]:
+    """Render ranked search results with snippets for CLI display."""
+    if not results:
+        return ["  No results found."]
+
+    lines: list[str] = []
+    for index, result in enumerate(results, 1):
+        snippet_clean = result.snippet.replace("<b>", "*").replace("</b>", "*")
+        lines.append(f"  {index}. {result.file_name}  ({result.virtual_path})")
+        if snippet_clean:
+            lines.append(f"     {snippet_clean}")
+    return lines
 
 
 def select_file_by_choice(choice: str, file_refs: Sequence[Any]) -> Any | None:
@@ -342,6 +357,7 @@ class VaultCLI:
             else:
                 print(f"  File ID: {result.file_id}")
                 print(f"  Blobs: {result.blob_count}")
+            print(f"  Indexed: {'yes' if result.indexed else 'no'}")
             print(f"  Original size: {result.original_size} bytes")
             print(f"  Encrypted size: {result.encrypted_size} bytes")
         except Exception as e:
@@ -432,6 +448,72 @@ class VaultCLI:
 
         print("Cancelled.")
 
+    def search_files(self) -> None:
+        """Search vault file contents or trigger reindex for supported files."""
+        print("\n=== Search Vault ===\n")
+        print("1. Search by content")
+        print("2. Re-index supported pending/failed files")
+        action = input("\nSelect option (blank to go back): ").strip()
+        if not action:
+            return
+        if action == "2":
+            self.reindex_supported_files()
+            return
+        if action != "1":
+            print("Invalid selection.")
+            return
+
+        query = input("\nSearch query: ").strip()
+        if not query:
+            print("Empty query.")
+            return
+
+        try:
+            results = self.service.search(query)
+        except Exception as e:
+            print(f"Search failed: {e}")
+            logger.exception("Search failed")
+            return
+
+        self._print_lines(render_search_result_lines(results))
+        if not results:
+            return
+
+        choice = input("\nOpen file? Enter number (blank to go back): ").strip()
+        if not choice:
+            return
+        if not choice.isdigit():
+            print("Invalid selection.")
+            return
+
+        selected_index = int(choice) - 1
+        if not (0 <= selected_index < len(results)):
+            print("Invalid selection.")
+            return
+
+        selected = results[selected_index]
+        try:
+            result = self.service.open_file_by_ref(
+                file_ref_id=selected.file_ref_id,
+                launch_in_default_app=True,
+            )
+            print(f"\n{result.message}")
+        except Exception as e:
+            print(f"\nError opening file: {e}")
+            logger.exception("Failed to open search result")
+
+    def reindex_supported_files(self) -> None:
+        """Retry indexing for supported files currently marked pending or failed."""
+        print("\nRe-indexing supported pending/failed files...")
+        try:
+            success, failed = self.service.reindex_pending()
+        except Exception as e:
+            print(f"Re-index failed: {e}")
+            logger.exception("Re-index failed")
+            return
+
+        print(f"Done. Indexed: {success}, Failed: {failed}")
+
     def show_db_key(self) -> None:
         """Print the vault database path and SQLCipher key for debugging."""
         print("\n=== Database Debug Info ===\n")
@@ -477,7 +559,7 @@ class VaultCLI:
             print("\n" + "=" * 40)
             self._print_lines(render_vault_menu_lines(self.service.vault_name))
 
-            choice = input("\nSelect option (1-7): ").strip()
+            choice = input("\nSelect option (1-8): ").strip()
 
             if choice == "1":
                 self.list_files()
@@ -488,10 +570,12 @@ class VaultCLI:
             elif choice == "4":
                 self.add_file()
             elif choice == "5":
-                self.show_recovery_phrase()
+                self.search_files()
             elif choice == "6":
-                self.show_db_key()
+                self.show_recovery_phrase()
             elif choice == "7":
+                self.show_db_key()
+            elif choice == "8":
                 print("\nClosing vault...")
                 break
             else:

@@ -89,6 +89,14 @@ class VaultService:
         """Encrypt and import a file from the filesystem into the vault."""
         return self.files.add_file(source, dest_name, dest_parent_virtual_path)
 
+    def search(self, query: str, limit: int = 20):
+        """Search vault files by indexed content."""
+        return self.files.search(query, limit)
+
+    def reindex_pending(self, limit: int = 500):
+        """Retry indexing for supported pending or failed files."""
+        return self.files.reindex_pending(limit)
+
     def open_file_by_ref(self, file_ref_id: int, launch_in_default_app: bool = True):
         """Open a vault file by its reference ID, optionally launching it in the default
         app."""

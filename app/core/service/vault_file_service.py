@@ -2,9 +2,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from app.core.database.service.search import get_retriable_extractions, search_content
+from app.core.database.service.session import session_scope
+from app.core.runtime_layout import runtime_cache_dir
+from app.core.service.extraction_service import ExtractionService
+from app.core.service.indexing_service import IndexingService
 from app.core.service.models import (
     AddFileResult,
     OpenFileResult,
+    SearchResult,
     UnlockedFileInfo,
     VaultContext,
 )
@@ -49,6 +55,7 @@ class VaultFileService:
             file_service=self._require_file_service(),
             folder_service=self._require_folder_service(),
             encryption_service=self._require_encryption_service(),
+            indexing_service=self._build_indexing_service(),
             source=source,
             dest_name=dest_name,
             dest_parent_virtual_path=dest_parent_virtual_path,
@@ -73,6 +80,71 @@ class VaultFileService:
         """Return all currently unlocked files from both FUSE mounts and fallback
         cache."""
         return list_unlocked_file_sessions(self.context)
+
+    def search(self, query: str, limit: int = 20) -> list[SearchResult]:
+        """Search indexed document content and resolve matches to visible file refs."""
+        normalized = query.strip()
+        if not normalized:
+            return []
+        if self.context.session_factory is None:
+            raise RuntimeError("Session factory is not initialized")
+
+        from app.core.database.model.file_reference import FileReference
+
+        with session_scope(self.context.session_factory, commit=False) as session:
+            fts_results = search_content(session, normalized, limit)
+            if not fts_results:
+                return []
+
+            results: list[SearchResult] = []
+            for file_entry_id, snippet, rank in fts_results:
+                refs = (
+                    session.query(FileReference)
+                    .filter(
+                        FileReference.file_entry_id == int(file_entry_id),
+                        FileReference.is_folder.is_(False),
+                    )
+                    .order_by(FileReference.id)
+                    .all()
+                )
+                for ref in refs:
+                    results.append(
+                        SearchResult(
+                            file_ref_id=ref.id,
+                            file_name=ref.name,
+                            virtual_path=ref.virtual_path,
+                            snippet=snippet,
+                            rank=rank,
+                        )
+                    )
+
+            return results
+
+    def reindex_pending(self, limit: int = 500) -> tuple[int, int]:
+        """Retry indexing for supported files in pending or failed state."""
+        if self.context.session_factory is None:
+            raise RuntimeError("Session factory is not initialized")
+
+        indexing_service = self._build_indexing_service()
+        if indexing_service is None:
+            raise RuntimeError("Indexing service is not available")
+
+        with session_scope(self.context.session_factory, commit=False) as session:
+            entries = get_retriable_extractions(session, limit=limit)
+
+        success = 0
+        failed = 0
+        for entry in entries:
+            filename = self._select_supported_reference_name(entry)
+            if filename is None:
+                continue
+
+            if indexing_service.index_file_entry(entry, filename):
+                success += 1
+            else:
+                failed += 1
+
+        return success, failed
 
     def reopen_unlocked(self, file_ref_id: int) -> str:
         """Re-launch a currently unlocked file in the default application."""
@@ -131,6 +203,35 @@ class VaultFileService:
         if not key_service or not key_service.master_key:
             raise RuntimeError("Vault is not unlocked")
         return key_service.unwrap_recovery_phrase_with_master()
+
+    def _build_indexing_service(self) -> IndexingService | None:
+        local_data_path = self.context.local_data_path
+        if (
+            self.context.session_factory is None
+            or self.context.encryption_service is None
+            or self.context.vault_path is None
+            or self.context.vault_id is None
+            or self.context.master_key is None
+            or local_data_path is None
+        ):
+            return None
+
+        return IndexingService(
+            session_factory=self.context.session_factory,
+            encryption_service=self.context.encryption_service,
+            vault_path=self.context.vault_path,
+            cache_dir=runtime_cache_dir(local_data_path),
+            master_key=self.context.master_key.view(),
+            vault_id=self.context.vault_id,
+        )
+
+    @staticmethod
+    def _select_supported_reference_name(entry) -> str | None:
+        for ref in getattr(entry, "references", []):
+            name = getattr(ref, "name", "")
+            if name and ExtractionService.is_supported(name):
+                return name
+        return None
 
     def _require_file_service(self) -> "FileService":
         """Return the file service or raise if not initialized."""

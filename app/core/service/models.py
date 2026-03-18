@@ -53,6 +53,16 @@ class AddFileResult:
     original_size: int
     encrypted_size: int
     blob_count: int
+    indexed: bool = False
+
+
+@dataclass
+class SearchResult:
+    file_ref_id: int
+    file_name: str
+    virtual_path: str
+    snippet: str
+    rank: float
 
 
 @dataclass

@@ -6,8 +6,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from app.core.crypto.service.utils import compute_hash
+from app.core.service.indexing_service import IndexingService
 from app.core.service.models import AddFileResult, VaultContext
 from app.core.vault_layout import resolve_blob_path
+from app.utils.logging import logger
 
 if TYPE_CHECKING:
     from app.core.crypto.service.encryption_service import EncryptionService
@@ -21,6 +23,7 @@ def add_file(
     file_service: "FileService",
     folder_service: "FolderService | None" = None,
     encryption_service: "EncryptionService",
+    indexing_service: "IndexingService | None" = None,
     source: Path,
     dest_name: str | None = None,
     dest_parent_virtual_path: str | None = None,
@@ -41,9 +44,14 @@ def add_file(
         dest_parent_virtual_path,
     )
     destination_name = dest_name or source.name
+    logger.info(f"Import started: source={source}, destination={destination_name}")
     content_hash = compute_hash(source)
     existing_entry = file_service.find_by_content_hash(content_hash)
     if existing_entry is not None:
+        logger.info(
+            f"Import deduplicated: destination={destination_name}, "
+            f"existing_entry_id={existing_entry.id}"
+        )
         file_service.create_file_reference(
             name=destination_name,
             parent_id=parent_id,
@@ -56,6 +64,7 @@ def add_file(
             original_size=existing_entry.original_size_bytes,
             encrypted_size=existing_entry.encrypted_size_bytes,
             blob_count=0,
+            indexed=getattr(existing_entry, "text_extraction_status", None) == "done",
         )
 
     blob_ids: list[str] = []
@@ -86,11 +95,27 @@ def add_file(
             blob_ids=blob_ids,
         )
         file_entry_created = True
+        logger.info(
+            f"Import encrypted and stored: destination={destination_name}, "
+            f"entry_id={file_entry.id}, file_id={file_id}, blobs={len(blob_ids)}"
+        )
         file_service.create_file_reference(
             name=destination_name,
             parent_id=parent_id,
             file_entry_id=file_entry.id,
         )
+
+        indexed = False
+        if indexing_service is not None:
+            logger.info(
+                f"Import triggering indexing: destination={destination_name}, "
+                f"entry_id={file_entry.id}"
+            )
+            indexed = indexing_service.index_file_entry(file_entry, destination_name)
+            logger.info(
+                f"Import indexing result: destination={destination_name}, "
+                f"entry_id={file_entry.id}, indexed={indexed}"
+            )
 
         return AddFileResult(
             file_name=destination_name,
@@ -99,8 +124,10 @@ def add_file(
             original_size=original_size,
             encrypted_size=encrypted_size,
             blob_count=len(blob_ids),
+            indexed=indexed,
         )
     except Exception:
+        logger.exception(f"Import failed: source={source}, destination={destination_name}")
         if blob_ids and not file_entry_created:
             _cleanup_partial_blobs(vault_path, blob_ids)
         raise
