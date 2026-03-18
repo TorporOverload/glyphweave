@@ -111,7 +111,11 @@ def add_file(
                 f"Import triggering indexing: destination={destination_name}, "
                 f"entry_id={file_entry.id}"
             )
-            indexed = indexing_service.index_file_entry(file_entry, destination_name)
+            indexed = indexing_service.index_source_file(
+                file_entry.id,
+                source,
+                destination_name,
+            )
             logger.info(
                 f"Import indexing result: destination={destination_name}, "
                 f"entry_id={file_entry.id}, indexed={indexed}"

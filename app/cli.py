@@ -131,6 +131,16 @@ def render_search_result_lines(results: Sequence[Any]) -> list[str]:
     return lines
 
 
+def render_search_options_lines(has_more: bool) -> list[str]:
+    """Return CLI option lines for the current search results page."""
+    lines = ["", "Options:"]
+    if has_more:
+        lines.append("  n. Next page")
+    lines.append("  [number]. Open file")
+    lines.append("  [blank]. Go back")
+    return lines
+
+
 def select_file_by_choice(choice: str, file_refs: Sequence[Any]) -> Any | None:
     """Select a file reference by index number or by name from user input."""
     if choice.isdigit():
@@ -468,39 +478,48 @@ class VaultCLI:
             print("Empty query.")
             return
 
-        try:
-            results = self.service.search(query)
-        except Exception as e:
-            print(f"Search failed: {e}")
-            logger.exception("Search failed")
-            return
+        limit = 20
+        offset = 0
+        while True:
+            try:
+                page = self.service.search_page(query, limit=limit, offset=offset)
+            except Exception as e:
+                print(f"Search failed: {e}")
+                logger.exception("Search failed")
+                return
 
-        self._print_lines(render_search_result_lines(results))
-        if not results:
-            return
+            results = page.results
+            self._print_lines(render_search_result_lines(results))
+            if not results:
+                return
 
-        choice = input("\nOpen file? Enter number (blank to go back): ").strip()
-        if not choice:
-            return
-        if not choice.isdigit():
-            print("Invalid selection.")
-            return
+            self._print_lines(render_search_options_lines(page.has_more))
+            choice = input("\nSelect option: ").strip()
+            if not choice:
+                return
+            if choice.lower() == "n" and page.has_more:
+                offset += limit
+                continue
+            if not choice.isdigit():
+                print("Invalid selection.")
+                continue
 
-        selected_index = int(choice) - 1
-        if not (0 <= selected_index < len(results)):
-            print("Invalid selection.")
-            return
+            selected_index = int(choice) - 1
+            if not (0 <= selected_index < len(results)):
+                print("Invalid selection.")
+                continue
 
-        selected = results[selected_index]
-        try:
-            result = self.service.open_file_by_ref(
-                file_ref_id=selected.file_ref_id,
-                launch_in_default_app=True,
-            )
-            print(f"\n{result.message}")
-        except Exception as e:
-            print(f"\nError opening file: {e}")
-            logger.exception("Failed to open search result")
+            selected = results[selected_index]
+            try:
+                result = self.service.open_file_by_ref(
+                    file_ref_id=selected.file_ref_id,
+                    launch_in_default_app=True,
+                )
+                print(f"\n{result.message}")
+            except Exception as e:
+                print(f"\nError opening file: {e}")
+                logger.exception("Failed to open search result")
+            return
 
     def reindex_supported_files(self) -> None:
         """Retry indexing for supported files currently marked pending or failed."""

@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from app.core.database.service.search import get_retriable_extractions, search_content
+from app.core.database.service.search import (
+    get_retriable_extractions,
+    search_content,
+    search_file_references,
+)
 from app.core.database.service.session import session_scope
 from app.core.runtime_layout import runtime_cache_dir
 from app.core.service.extraction_service import ExtractionService
@@ -10,6 +14,7 @@ from app.core.service.indexing_service import IndexingService
 from app.core.service.models import (
     AddFileResult,
     OpenFileResult,
+    SearchPage,
     SearchResult,
     UnlockedFileInfo,
     VaultContext,
@@ -83,20 +88,43 @@ class VaultFileService:
 
     def search(self, query: str, limit: int = 20) -> list[SearchResult]:
         """Search indexed document content and resolve matches to visible file refs."""
+        return self.search_page(query, limit=limit, offset=0).results
+
+    def search_page(
+        self,
+        query: str,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> SearchPage:
+        """Return one page of ranked search results and whether more results exist."""
         normalized = query.strip()
         if not normalized:
-            return []
+            return SearchPage(results=[], has_more=False)
         if self.context.session_factory is None:
             raise RuntimeError("Session factory is not initialized")
 
         from app.core.database.model.file_reference import FileReference
 
         with session_scope(self.context.session_factory, commit=False) as session:
-            fts_results = search_content(session, normalized, limit)
-            if not fts_results:
-                return []
-
+            fetch_limit = max(limit + offset + 1, 1)
             results: list[SearchResult] = []
+            seen_ref_ids: set[int] = set()
+
+            for ref_id, file_name, virtual_path, rank in search_file_references(
+                session, normalized, fetch_limit
+            ):
+                results.append(
+                    SearchResult(
+                        file_ref_id=ref_id,
+                        file_name=file_name,
+                        virtual_path=virtual_path,
+                        snippet=self._format_filename_snippet(file_name, normalized),
+                        rank=rank,
+                    )
+                )
+                seen_ref_ids.add(ref_id)
+
+            fts_results = search_content(session, normalized, fetch_limit)
             for file_entry_id, snippet, rank in fts_results:
                 refs = (
                     session.query(FileReference)
@@ -108,6 +136,8 @@ class VaultFileService:
                     .all()
                 )
                 for ref in refs:
+                    if ref.id in seen_ref_ids:
+                        continue
                     results.append(
                         SearchResult(
                             file_ref_id=ref.id,
@@ -117,8 +147,13 @@ class VaultFileService:
                             rank=rank,
                         )
                     )
+                    seen_ref_ids.add(ref.id)
 
-            return results
+            page_results = results[offset : offset + limit]
+            return SearchPage(
+                results=page_results,
+                has_more=len(results) > offset + limit,
+            )
 
     def reindex_pending(self, limit: int = 500) -> tuple[int, int]:
         """Retry indexing for supported files in pending or failed state."""
@@ -232,6 +267,28 @@ class VaultFileService:
             if name and ExtractionService.is_supported(name):
                 return name
         return None
+
+    @staticmethod
+    def _format_filename_snippet(file_name: str, query: str) -> str:
+        exact_index = file_name.find(query)
+        if exact_index >= 0:
+            return (
+                f"Filename: {file_name[:exact_index]}<b>{
+                    file_name[exact_index: exact_index + len(query)]}</b>"
+                f"{file_name[exact_index + len(query):]}"
+            )
+
+        lower_name = file_name.lower()
+        lower_query = query.lower()
+        lower_index = lower_name.find(lower_query)
+        if lower_index >= 0:
+            return (
+                f"Filename: {file_name[:lower_index]}<b>{
+                    file_name[lower_index: lower_index + len(query)]}</b>"
+                f"{file_name[lower_index + len(query):]}"
+            )
+
+        return f"Filename: {file_name}"
 
     def _require_file_service(self) -> "FileService":
         """Return the file service or raise if not initialized."""

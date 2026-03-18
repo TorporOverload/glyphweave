@@ -1,4 +1,5 @@
 import time
+import re
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import text
@@ -13,6 +14,29 @@ if TYPE_CHECKING:
 INSERT_SEARCH_INDEX_STATEMENT = text("""
     INSERT INTO search_index (file_entry_id, content)
     VALUES (:file_entry_id, :content)
+""")
+
+SEARCH_FILE_REFERENCES_STATEMENT = text("""
+    SELECT
+        fr.id,
+        fr.name,
+        fr.virtual_path,
+        snippet(search_filename_index, 1, '<b>', '</b>', '...', 32) AS snippet_text,
+        CASE
+            WHEN fr.name = :exact_query THEN 3
+            WHEN instr(fr.name, :exact_query) = 1 THEN 2
+            WHEN :use_dhivehi_exact_boost = 1 AND 
+                instr(fr.name, :exact_query) > 0 THEN 1
+            WHEN instr(fr.name, :exact_query) > 0 THEN 1
+            ELSE 0
+        END AS exact_match_boost,
+        bm25(search_filename_index) AS rank
+    FROM search_filename_index
+    JOIN file_reference AS fr ON fr.id = search_filename_index.file_ref_id
+    WHERE search_filename_index MATCH :query
+      AND fr.is_folder = 0
+    ORDER BY exact_match_boost DESC, rank, fr.id
+    LIMIT :limit
 """)
 
 SEARCH_CONTENT_STATEMENT = text("""
@@ -31,7 +55,8 @@ SEARCH_CONTENT_DHIVEHI_VOWEL_STATEMENT = text("""
         file_entry_id,
         snippet(search_index, 1, '<b>', '</b>', '...', 32) AS snippet_text,
         bm25(search_index) AS rank,
-        CASE WHEN instr(content, :exact_query) > 0 THEN 1 ELSE 0 END AS exact_match_boost
+        CASE WHEN instr(content, :exact_query) > 0 
+            THEN 1 ELSE 0 END AS exact_match_boost
     FROM search_index
     WHERE search_index MATCH :query
     ORDER BY exact_match_boost DESC, rank, file_entry_id
@@ -54,9 +79,30 @@ DHIVEHI_VOWEL_SIGNS = frozenset(
     }
 )
 
+FTS_BOOLEAN_OPERATOR_PATTERN = re.compile(r"\b(?:AND|OR|NOT)\b")
+
 
 def _contains_dhivehi_vowel_signs(text_value: str) -> bool:
     return any(char in DHIVEHI_VOWEL_SIGNS for char in text_value)
+
+
+def _prepare_filename_match_query(text_value: str) -> str:
+    if (
+        not text_value
+        or '"' in text_value
+        or "(" in text_value
+        or ")" in text_value
+        or "*" in text_value
+        or ":" in text_value
+        or FTS_BOOLEAN_OPERATOR_PATTERN.search(text_value)
+    ):
+        return text_value
+
+    terms = [term for term in text_value.split() if term]
+    if not terms:
+        return text_value
+
+    return " ".join(f"{term}*" for term in terms)
 
 
 def insert_document_content(
@@ -104,6 +150,28 @@ def search_content(
 
     rows = session.execute(statement, params).fetchall()
     return [(str(row[0]), row[1] or "", float(row[2])) for row in rows]
+
+
+def search_file_references(
+    session: Session,
+    query: str,
+    limit: int = 20,
+) -> list[tuple[int, str, str, float]]:
+    """Search visible filenames via FTS and return ranked file reference hits."""
+    normalized = query.strip()
+    if not normalized:
+        return []
+
+    rows = session.execute(
+        SEARCH_FILE_REFERENCES_STATEMENT,
+        {
+            "query": _prepare_filename_match_query(normalized),
+            "exact_query": normalized,
+            "limit": limit,
+            "use_dhivehi_exact_boost": int(_contains_dhivehi_vowel_signs(normalized)),
+        },
+    ).fetchall()
+    return [(int(row[0]), row[1], row[2], float(row[5])) for row in rows]
 
 
 def update_extraction_status(

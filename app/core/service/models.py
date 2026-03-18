@@ -66,6 +66,12 @@ class SearchResult:
 
 
 @dataclass
+class SearchPage:
+    results: list[SearchResult]
+    has_more: bool
+
+
+@dataclass
 class VaultContext:
     app_data_dir: Path
     vault_id: str | None = None
