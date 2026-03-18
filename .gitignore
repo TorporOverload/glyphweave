@@ -57,7 +57,8 @@ Thumbs.db
 
 # Test files
 
-test_files/
+.test_tmp/
 test_data/
-test_runs_tmp/
-test/
+
+.ruff_cache/
+.uv_cache/

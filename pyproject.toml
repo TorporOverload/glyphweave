@@ -43,4 +43,4 @@ ignore = ["S101"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-norecursedirs = ["_tmp", "test_runs_tmp", ".pytest_tmp", ".pytest_tmp_run1"]
+norecursedirs = ["_tmp", "test_runs_tmp", ".pytest_tmp", ".pytest_tmp_run1", ".test_tmp", "__pycache__"]

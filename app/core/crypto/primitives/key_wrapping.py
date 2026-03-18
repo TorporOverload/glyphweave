@@ -13,6 +13,14 @@ from app.exceptions.crypto import InvalidPasswordError
 from app.utils.logging import logger, timed_operation
 
 
+def _key_to_bytes(value: KeyMaterial) -> bytes:
+    """Normalize supported key material inputs to immutable bytes."""
+    if isinstance(value, bytes):
+        return value
+    if isinstance(value, (bytearray, memoryview)):
+        return bytes(value)
+
+
 @timed_operation("wrap_key")
 def wrap_key(key_encryption_key: KeyMaterial, key_to_wrap: KeyMaterial) -> bytes:
     """
@@ -25,16 +33,13 @@ def wrap_key(key_encryption_key: KeyMaterial, key_to_wrap: KeyMaterial) -> bytes
     Returns: Wrapped key ciphertext
     """
     logger.debug("Wrapping key with AES Key Wrap.")
-    if not isinstance(key_encryption_key, bytes):
-        raise TypeError("Invalid key type")
+    normalized_kek = _key_to_bytes(key_encryption_key)
+    normalized_key = _key_to_bytes(key_to_wrap)
 
-    if not isinstance(key_to_wrap, bytes):
-        raise TypeError("Invalid key type")
-        
-    if len(key_to_wrap) % 8 == 0:
-        wrapped = aes_key_wrap(key_encryption_key, key_to_wrap)
+    if len(normalized_key) % 8 == 0:
+        wrapped = aes_key_wrap(normalized_kek, normalized_key)
     else:
-        wrapped = aes_key_wrap_with_padding(key_encryption_key, key_to_wrap)
+        wrapped = aes_key_wrap_with_padding(normalized_kek, normalized_key)
     logger.debug("Key wrapped successfully.")
     return wrapped
 
@@ -54,20 +59,19 @@ def unwrap_key(key_encryption_key: KeyMaterial, wrapped_key: KeyMaterial) -> byt
         InvalidPasswordError: If the key cannot be unwrapped (invalid KEK)
     """
     logger.debug("Unwrapping key with AES Key Wrap.")
-    
-    if not isinstance(key_encryption_key, bytes):
-        raise TypeError("Invalid key type")
 
-    if not isinstance(wrapped_key, bytes):
-        raise TypeError("Invalid key type")
-    
+    normalized_kek = _key_to_bytes(key_encryption_key)
+    normalized_wrapped_key = _key_to_bytes(wrapped_key)
+
     try:
-        key = aes_key_unwrap(key_encryption_key, wrapped_key)
+        key = aes_key_unwrap(normalized_kek, normalized_wrapped_key)
         logger.debug("Key unwrapped successfully.")
         return key
     except InvalidUnwrap:
         try:
-            key = aes_key_unwrap_with_padding(key_encryption_key, wrapped_key)
+            key = aes_key_unwrap_with_padding(
+                normalized_kek, normalized_wrapped_key
+            )
             logger.debug("Key unwrapped successfully.")
             return key
         except InvalidUnwrap:
