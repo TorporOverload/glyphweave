@@ -20,7 +20,7 @@ P = ParamSpec("P")
 T = TypeVar("T")
 
 # Check environment variable once at import
-DEBUG_LEVEL = int(os.environ.get("GLYPHWEAVE_DEBUG", "3"))  # TODO Chaneg back to 0
+DEBUG_LEVEL = int(os.environ.get("GLYPHWEAVE_DEBUG", "0"))
 DEBUG_ENABLED = DEBUG_LEVEL > 0
 APP_DATA_DIR = ensure_app_data_layout(get_app_data_dir())
 DEFAULT_LOG_DIR = APP_DATA_DIR / "logs"
@@ -67,7 +67,8 @@ def _build_console_stream():
         try:
             reconfigure(errors="backslashreplace")
             return stream
-        except Exception:
+        except Exception as e:
+            print(f"Error building coonsole stream: {e}")
             pass
 
     return _SafeConsoleStream(stream)

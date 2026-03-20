@@ -2,7 +2,7 @@ from sqlalchemy import ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, Relationship, relationship
 from sqlalchemy.orm import mapped_column
 from typing import TYPE_CHECKING
-from app.core.database.base import Base
+from app.core.database.base_model import Base
 if TYPE_CHECKING:
     from app.core.database.model.file_entry import FileEntry
 

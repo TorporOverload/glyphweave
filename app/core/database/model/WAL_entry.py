@@ -7,7 +7,7 @@ from sqlalchemy.orm import Mapped, Relationship, mapped_column, relationship
 if TYPE_CHECKING:
     from app.core.database.model.file_reference import FileReference
 
-from app.core.database.base import Base
+from app.core.database.base_model import Base
 
 
 class WalEntry(Base):

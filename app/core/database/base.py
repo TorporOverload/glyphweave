@@ -5,18 +5,15 @@ from pathlib import Path
 
 import sqlcipher3
 from sqlalchemy import create_engine, event
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.orm import sessionmaker
 
 from app.config import get_vaults_data_dir
+from app.core.database.base_model import Base
 from app.utils.logging import logger
 
 DB_FILENAME = "vault.db"
 
 engine = None
-
-
-class Base(DeclarativeBase):
-    pass
 
 
 from app.core.database.model import search_index  # noqa: F401, E402

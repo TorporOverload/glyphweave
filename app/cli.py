@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import platform
 import sys
+import signal
 from collections.abc import Callable, Sequence
 from getpass import getpass
 from pathlib import Path
@@ -609,10 +610,21 @@ def run_cli() -> None:
     menu."""
     check_os()
     cli = VaultCLI()
+    _install_signal_handlers(cli)
     if not cli.setup_vault():
         sys.exit(1)
     cli.vault_menu()
 
+def _install_signal_handlers(cli: VaultCLI) -> None:
+    def _handle_interrupt(signum, frame) -> None:
+        del signum, frame
+        print("\nInterrupt received. Cleaning up...")
+        try:
+            cli.service.cleanup()
+        finally:
+            raise SystemExit(130)
+
+    signal.signal(signal.SIGINT, _handle_interrupt)
 
 def main() -> None:
     """Invoke the CLI entry point."""

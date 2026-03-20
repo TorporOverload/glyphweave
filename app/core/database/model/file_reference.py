@@ -16,7 +16,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, Relationship, mapped_column, relationship
 from sqlalchemy.orm.attributes import get_history
 
-from app.core.database.base import Base
+from app.core.database.base_model import Base
 
 if TYPE_CHECKING:
     from app.core.database.model.file_entry import FileEntry

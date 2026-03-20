@@ -2,7 +2,7 @@
 
 from sqlalchemy import DDL, event
 
-from app.core.database.base import Base
+from app.core.database.base_model import Base
 
 create_search_index_table = DDL("""
 CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
@@ -29,7 +29,6 @@ trigger_search_filename_index_insert = DDL("""
 CREATE TRIGGER IF NOT EXISTS trigger_insert_search_filename_index
     AFTER INSERT ON file_reference
     FOR EACH ROW
-        WHEN NEW.is_folder = 0
         BEGIN
             INSERT INTO search_filename_index (file_ref_id, file_name)
             VALUES (NEW.id, NEW.name);
@@ -47,13 +46,12 @@ CREATE TRIGGER IF NOT EXISTS trigger_delete_search_filename_index
 
 trigger_search_filename_index_update = DDL("""
 CREATE TRIGGER IF NOT EXISTS trigger_update_search_filename_index
-    AFTER UPDATE OF name, is_folder ON file_reference
+    AFTER UPDATE OF name ON file_reference
     FOR EACH ROW
         BEGIN
             DELETE FROM search_filename_index WHERE file_ref_id = OLD.id;
             INSERT INTO search_filename_index (file_ref_id, file_name)
-            SELECT NEW.id, NEW.name
-            WHERE NEW.is_folder = 0;
+            VALUES (NEW.id, NEW.name);
         END;
 """)
 
@@ -61,8 +59,7 @@ sync_search_filename_index = DDL("""
 INSERT INTO search_filename_index (file_ref_id, file_name)
 SELECT fr.id, fr.name
 FROM file_reference AS fr
-WHERE fr.is_folder = 0
-  AND NOT EXISTS (
+WHERE NOT EXISTS (
       SELECT 1
       FROM search_filename_index AS sfi
       WHERE sfi.file_ref_id = fr.id
