@@ -1,58 +1,71 @@
+import threading
 import time
+from pathlib import Path
 from typing import Dict, Optional
 
 from .models import MountInfo
 from .runtime import get_runtime_module
 
 
-def is_mounted(orchestrator, file_ref_id: int) -> bool:
+def is_mounted(
+    mounts: Dict[int, MountInfo], lock: threading.Lock, file_ref_id: int
+) -> bool:
     """Return True if a FUSE mount is currently active for the given file reference."""
-    with orchestrator._lock:
-        return file_ref_id in orchestrator._mounts
+    with lock:
+        return file_ref_id in mounts
 
 
-def get_mounted_path(orchestrator, file_ref_id: int) -> Optional[object]:
+def get_mounted_path(
+    mounts: Dict[int, MountInfo], lock: threading.Lock, file_ref_id: int
+) -> Optional[Path]:
     """Return the mounted file path for a reference, or None if not mounted."""
-    with orchestrator._lock:
-        info = orchestrator._mounts.get(file_ref_id)
+    with lock:
+        info = mounts.get(file_ref_id)
         return info.file_path if info else None
 
 
-def active_mount_count(orchestrator) -> int:
+def active_mount_count(mounts: Dict[int, MountInfo], lock: threading.Lock) -> int:
     """Return the number of currently active FUSE mounts."""
-    with orchestrator._lock:
-        return len(orchestrator._mounts)
+    with lock:
+        return len(mounts)
 
 
-def get_active_mounts(orchestrator) -> Dict[int, MountInfo]:
+def get_active_mounts(
+    mounts: Dict[int, MountInfo], lock: threading.Lock
+) -> Dict[int, MountInfo]:
     """Return a snapshot dict of all active MountInfo objects keyed by file_ref_id."""
-    with orchestrator._lock:
-        return dict(orchestrator._mounts)
+    with lock:
+        return dict(mounts)
 
 
-def unmount(orchestrator, file_ref_id: int, background: bool = False) -> bool:
+def do_unmount(
+    mounts: Dict[int, MountInfo],
+    lock: threading.Lock,
+    file_ref_id: int,
+    background: bool = False,
+) -> bool:
     """Tear down the FUSE mount for file_ref_id, optionally in a background thread."""
     rt = get_runtime_module()
-    with orchestrator._lock:
-        if file_ref_id not in orchestrator._mounts:
+    with lock:
+        if file_ref_id not in mounts:
             return False
-        info = orchestrator._mounts.pop(file_ref_id)
+        info = mounts.pop(file_ref_id)
 
     if background:
         thread = rt.threading.Thread(
             target=unmount_info,
-            args=(orchestrator, file_ref_id, info),
+            args=(file_ref_id, info),
             name=f"glyphweave_unmount_{file_ref_id}",
             daemon=True,
         )
         thread.start()
         return True
 
-    unmount_info(orchestrator, file_ref_id, info)
+    unmount_info(file_ref_id, info)
     return True
 
 
-def unmount_info(orchestrator, file_ref_id: int, info: MountInfo) -> None:
+def unmount_info(file_ref_id: int, info: MountInfo) -> None:
     """Send CTRL_BREAK, run net-use delete, wait for the FUSE process,
     and clean up the mount dir."""
     rt = get_runtime_module()
@@ -70,6 +83,8 @@ def unmount_info(orchestrator, file_ref_id: int, info: MountInfo) -> None:
     if info.process is None:
         wait_for_handles_to_close(info, timeout=20.0)
 
+    signal_failed = False
+    unmount_cmd_failed = False
     try:
         if info.process is not None:
             try:
@@ -77,9 +92,11 @@ def unmount_info(orchestrator, file_ref_id: int, info: MountInfo) -> None:
                     getattr(__import__("signal"), "CTRL_BREAK_EVENT")
                 )
             except Exception as e:
+                signal_failed = True
                 rt.logger.warning(f"CTRL_BREAK_EVENT failed (non-fatal): {e}")
         _run_unmount()
     except Exception as e:
+        unmount_cmd_failed = True
         rt.logger.warning(f"Unmount command failed for {info.mount_dir}: {e}")
 
     time.sleep(0.2)
@@ -87,13 +104,13 @@ def unmount_info(orchestrator, file_ref_id: int, info: MountInfo) -> None:
         try:
             info.process.wait(timeout=10.0)
         except Exception as e:
-            rt.logger.warning(f"Error kiling fuse: {e}")
+            rt.logger.warning(f"Error killing FUSE process: {e}")
 
         if info.process.poll() is None:
             try:
                 info.process.terminate()
             except Exception as e:
-                rt.logger.warning(f"Error kiling fuse: {e}")
+                rt.logger.warning(f"Error killing FUSE process: {e}")
 
     if info.thread is not None:
         info.thread.join(timeout=10.0)
@@ -113,6 +130,16 @@ def unmount_info(orchestrator, file_ref_id: int, info: MountInfo) -> None:
                 rt.logger.debug(
                     f"FUSE thread for ref={file_ref_id} still alive after unmount"
                 )
+
+    process_still_running = (
+        info.process is not None and info.process.poll() is None
+    )
+    if process_still_running and signal_failed and unmount_cmd_failed:
+        rt.logger.error(
+            f"FUSE process for ref={file_ref_id} could not be stopped; "
+            f"skipping mount dir cleanup to avoid data loss"
+        )
+        return
 
     try:
         if info.mount_dir.exists():
@@ -134,22 +161,26 @@ def wait_for_handles_to_close(info: MountInfo, timeout: float) -> None:
         try:
             if handle_manager.open_handle_count == 0:
                 return
-        except Exception:
+        except AttributeError:
             return
         time.sleep(0.25)
 
 
-def cleanup_all(orchestrator) -> int:
-    """Unmount all active mounts, remove the mount base directory, 
+def cleanup_all(
+    mounts: Dict[int, MountInfo],
+    lock: threading.Lock,
+    mount_base: Path,
+) -> int:
+    """Unmount all active mounts, remove the mount base directory,
     and return the count removed."""
-    with orchestrator._lock:
-        ref_ids = list(orchestrator._mounts.keys())
+    with lock:
+        ref_ids = list(mounts.keys())
 
     for ref_id in ref_ids:
-        orchestrator.unmount(ref_id)
+        do_unmount(mounts, lock, ref_id)
 
     count = len(ref_ids)
-    if orchestrator.mount_base.exists():
-        get_runtime_module().shutil.rmtree(orchestrator.mount_base, ignore_errors=True)
-    orchestrator.mount_base.mkdir(parents=True, exist_ok=True)
+    if mount_base.exists():
+        get_runtime_module().shutil.rmtree(mount_base, ignore_errors=True)
+    mount_base.mkdir(parents=True, exist_ok=True)
     return count

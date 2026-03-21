@@ -80,6 +80,10 @@ class VaultService:
         """Return all children of the specified folder."""
         return self.files.list_children(parent_id)
 
+    def list_all_entries(self):
+        """Return all entries in the vault tree."""
+        return self.files.list_all_entries()
+
     def add_file(
         self,
         source: Path,
@@ -100,6 +104,46 @@ class VaultService:
     def reindex_pending(self, limit: int = 500):
         """Retry indexing for supported pending or failed files."""
         return self.files.reindex_pending(limit)
+
+    def copy_entry(
+        self,
+        source_virtual_path: str,
+        destination_folder_virtual_path: str = "/",
+        new_name: str | None = None,
+    ):
+        """Copy a file or folder within the vault."""
+        return self.files.copy_entry(
+            source_virtual_path,
+            destination_folder_virtual_path,
+            new_name,
+        )
+
+    def move_entries(
+        self,
+        source_virtual_paths: list[str],
+        destination_folder_virtual_path: str = "/",
+    ):
+        """Move multiple files or folders within the vault."""
+        return self.files.move_entries(
+            source_virtual_paths,
+            destination_folder_virtual_path,
+        )
+
+    def delete_entries(self, source_virtual_paths: list[str]) -> int:
+        """Delete one or more files or folders from the vault."""
+        return self.files.delete_entries(source_virtual_paths)
+
+    def rename_entry(self, source_virtual_path: str, new_name: str):
+        """Rename a vault file or folder."""
+        return self.files.rename_entry(source_virtual_path, new_name)
+
+    def export_entries(self, source_virtual_paths: list[str], destination_dir: Path):
+        """Export one or more files or folders to the filesystem."""
+        return self.files.export_entries(source_virtual_paths, destination_dir)
+
+    def get_file_reference_metadata(self, file_ref_id: int) -> dict:
+        """Return stored metadata for a file reference."""
+        return self.files.get_file_reference_metadata(file_ref_id)
 
     def open_file_by_ref(self, file_ref_id: int, launch_in_default_app: bool = True):
         """Open a vault file by its reference ID,

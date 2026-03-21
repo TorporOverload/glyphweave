@@ -117,7 +117,6 @@ def main() -> int:
         key=lambda bid: next(b.blob_index for b in entry.blobs if b.blob_id == bid),
     )
 
-    session = session_factory()
     fs = SingleFileFS(
         file_name=args.mount_file_name or file_ref.name,
         file_id=entry.file_id,
@@ -129,8 +128,7 @@ def main() -> int:
         mount_dir=mount_dir,
         key_service=key_service,
         vault_id=args.vault_id.encode("utf-8"),
-        db_session=session,
-        # master_key=key_service.master_key.get(),
+        session_factory=session_factory,
     )
 
     fuse_kwargs: dict = {

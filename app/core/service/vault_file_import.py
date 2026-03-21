@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from app.core.crypto.service.utils import compute_hash
+from app.core.database.model.extraction_status import ExtractionStatus
 from app.core.service.indexing_service import IndexingService
 from app.core.service.models import AddFileResult, VaultContext
 from app.core.vault_layout import resolve_blob_path
@@ -64,7 +65,10 @@ def add_file(
             original_size=existing_entry.original_size_bytes,
             encrypted_size=existing_entry.encrypted_size_bytes,
             blob_count=0,
-            indexed=getattr(existing_entry, "text_extraction_status", None) == "done",
+            indexed=(
+                getattr(existing_entry, "text_extraction_status", None)
+                == ExtractionStatus.DONE.value
+            ),
         )
 
     blob_ids: list[str] = []

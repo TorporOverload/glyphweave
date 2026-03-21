@@ -10,7 +10,6 @@ from getpass import getpass
 from pathlib import Path
 from typing import Any
 
-from app.core.service.safe_paths import safe_cache_path
 from app.core.service.vault_service import VaultService
 from app.utils.logging import logger
 
@@ -111,9 +110,10 @@ def render_vault_menu_lines(vault_name: str | None) -> list[str]:
         "3. List unlocked files",
         "4. Add file",
         "5. Search",
-        "6. Show recovery phrase",
-        "7. Show DB key (debug)",
-        "8. Exit",
+        "6. Manage files/folders",
+        "7. Show recovery phrase",
+        "8. Show DB key (debug)",
+        "9. Exit",
         "=" * 40,
     ]
 
@@ -154,6 +154,11 @@ def select_file_by_choice(choice: str, file_refs: Sequence[Any]) -> Any | None:
         if ref.name == choice:
             return ref
     return None
+
+
+def parse_path_list(text: str) -> list[str]:
+    """Parse a comma-separated list of vault paths."""
+    return [part.strip().strip('"') for part in text.split(",") if part.strip()]
 
 
 def _size_suffix(ref: Any) -> str:
@@ -522,6 +527,151 @@ class VaultCLI:
                 logger.exception("Failed to open search result")
             return
 
+    def manage_entries(self) -> None:
+        """Manage vault files and folders by virtual path."""
+        print("\n=== Manage Vault Entries ===\n")
+        self._print_entry_paths()
+        print("\n1. Copy file/folder")
+        print("2. Move file/folder(s)")
+        print("3. Delete file/folder(s)")
+        print("4. Rename file/folder")
+        print("5. Export file/folder(s)")
+
+        action = input("\nSelect option (blank to go back): ").strip()
+        if not action:
+            return
+        if action == "1":
+            self.copy_entry()
+            return
+        if action == "2":
+            self.move_entries()
+            return
+        if action == "3":
+            self.delete_entries()
+            return
+        if action == "4":
+            self.rename_entry()
+            return
+        if action == "5":
+            self.export_entries()
+            return
+        print("Invalid selection.")
+
+    def copy_entry(self) -> None:
+        """Copy a vault file or folder."""
+        source_path = input("Source vault path: ").strip().strip('"')
+        if not source_path:
+            print("No source selected.")
+            return
+
+        destination = input("Destination folder path in vault (default: /): ").strip()
+        new_name = input("New name in destination (blank to keep current): ").strip()
+        try:
+            copied = self.service.copy_entry(
+                source_path,
+                destination or "/",
+                new_name or None,
+            )
+        except Exception as e:
+            print(f"\nCopy failed: {e}")
+            logger.exception("Copy failed")
+            return
+
+        print(f"Copied to {copied.virtual_path}")
+
+    def move_entries(self) -> None:
+        """Move one or more vault entries."""
+        source_input = input(
+            "Source vault paths (comma-separated for multiple): "
+        ).strip()
+        source_paths = parse_path_list(source_input)
+        if not source_paths:
+            print("No source selected.")
+            return
+
+        destination = input("Destination folder path in vault (default: /): ").strip()
+        try:
+            moved = self.service.move_entries(source_paths, destination or "/")
+        except Exception as e:
+            print(f"\nMove failed: {e}")
+            logger.exception("Move failed")
+            return
+
+        print(f"Moved {len(moved)} entr{'y' if len(moved) == 1 else 'ies'}.")
+        for entry in moved:
+            print(f"  {entry.virtual_path}")
+
+    def delete_entries(self) -> None:
+        """Delete one or more vault entries."""
+        source_input = input(
+            "Vault paths to delete (comma-separated for multiple): "
+        ).strip()
+        source_paths = parse_path_list(source_input)
+        if not source_paths:
+            print("No source selected.")
+            return
+
+        confirm = input("Type DELETE to confirm: ").strip()
+        if confirm != "DELETE":
+            print("Cancelled.")
+            return
+
+        try:
+            deleted = self.service.delete_entries(source_paths)
+        except Exception as e:
+            print(f"\nDelete failed: {e}")
+            logger.exception("Delete failed")
+            return
+
+        print(f"Deleted {deleted} entr{'y' if deleted == 1 else 'ies'}.")
+
+    def rename_entry(self) -> None:
+        """Rename a vault file or folder."""
+        source_path = input("Vault path to rename: ").strip().strip('"')
+        if not source_path:
+            print("No source selected.")
+            return
+
+        new_name = input("New name: ").strip()
+        if not new_name:
+            print("New name cannot be empty.")
+            return
+
+        try:
+            renamed = self.service.rename_entry(source_path, new_name)
+        except Exception as e:
+            print(f"\nRename failed: {e}")
+            logger.exception("Rename failed")
+            return
+
+        print(f"Renamed to {renamed.virtual_path}")
+
+    def export_entries(self) -> None:
+        """Export one or more vault entries to the filesystem."""
+        source_input = input(
+            "Vault paths to export (comma-separated for multiple): "
+        ).strip()
+        source_paths = parse_path_list(source_input)
+        if not source_paths:
+            print("No source selected.")
+            return
+
+        destination = input("Destination directory on this system: ").strip().strip('"')
+        if not destination:
+            print("Destination directory is required.")
+            return
+
+        try:
+            exported = self.service.export_entries(source_paths, Path(destination))
+        except Exception as e:
+            print(f"\nExport failed: {e}")
+            logger.exception("Export failed")
+            return
+
+        print(f"Exported {len(exported)} entr{'y' if len(exported) == 1 else 'ies'}.")
+        for path in exported:
+            print(f"  {path}")
+
     def reindex_supported_files(self) -> None:
         """Retry indexing for supported files currently marked pending or failed."""
         print("\nRe-indexing supported pending/failed files...")
@@ -563,15 +713,26 @@ class VaultCLI:
         print(f"\n{phrase}\n")
 
     @staticmethod
-    def _safe_cache_path(cache_dir: Path, file_name: str) -> Path:
-        """Delegate to safe_cache_path to resolve a path-traversal-safe cache path."""
-        return safe_cache_path(cache_dir, file_name)
-
-    @staticmethod
     def _print_lines(lines: list[str]) -> None:
         """Print each line in the list to stdout."""
         for line in lines:
             print(line)
+
+    def _print_entry_paths(self) -> None:
+        """Print all vault entries with their virtual paths."""
+        try:
+            entries = self.service.list_all_entries()
+        except Exception as e:
+            print(f"Failed to load entries: {e}")
+            return
+
+        if not entries:
+            print("  (no files in vault)")
+            return
+
+        for entry in entries:
+            prefix = "[DIR] " if entry.is_folder else ""
+            print(f"  {prefix}{entry.virtual_path}")
 
     def vault_menu(self) -> None:
         """Run the main vault action loop until the user chooses to exit."""
@@ -579,7 +740,7 @@ class VaultCLI:
             print("\n" + "=" * 40)
             self._print_lines(render_vault_menu_lines(self.service.vault_name))
 
-            choice = input("\nSelect option (1-8): ").strip()
+            choice = input("\nSelect option (1-9): ").strip()
 
             if choice == "1":
                 self.list_files()
@@ -592,10 +753,12 @@ class VaultCLI:
             elif choice == "5":
                 self.search_files()
             elif choice == "6":
-                self.show_recovery_phrase()
+                self.manage_entries()
             elif choice == "7":
-                self.show_db_key()
+                self.show_recovery_phrase()
             elif choice == "8":
+                self.show_db_key()
+            elif choice == "9":
                 print("\nClosing vault...")
                 break
             else:

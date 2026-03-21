@@ -89,8 +89,6 @@ class VaultContext:
     mounts: FuseOrchestrator | None = None
     master_key: SecureMemory | None = None
 
-    fallback_opens: dict[int, PendingFallbackOpen] = field(default_factory=dict)
-
     def require_vault_path(self) -> Path:
         """Return vault_path or raise RuntimeError if not set."""
         if self.vault_path is None:

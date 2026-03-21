@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 import mimetypes
 import uuid
 from pathlib import Path
@@ -9,10 +10,14 @@ from app.core.crypto.service.utils import compute_hash
 from app.core.runtime_layout import decrypted_files_dir, runtime_cache_dir
 from app.core.service.launcher_service import open_with_default_app
 from app.core.service.models import OpenFileResult, PendingFallbackOpen, VaultContext
+
 from app.core.service.safe_paths import safe_cache_path
 from app.core.vault_layout import resolve_blob_path
 from app.utils.file_extensions import ensure_extension_from_mime
 from app.utils.logging import logger
+
+
+FallbackOpens = dict[int, PendingFallbackOpen]
 
 if TYPE_CHECKING:
     from app.core.crypto.service.encryption_service import EncryptionService
@@ -21,19 +26,19 @@ if TYPE_CHECKING:
 
 
 def get_cached_fallback_result(
-    context: VaultContext,
+    fallback_opens: FallbackOpens,
     file_ref_id: int,
     file_name: str,
     launch_in_default_app: bool,
 ) -> OpenFileResult | None:
     """Return a cached fallback open result if one exists and the temp file is still
     present."""
-    existing = context.fallback_opens.get(file_ref_id)
+    existing = fallback_opens.get(file_ref_id)
     if existing is None:
         return None
 
     if not existing.temp_path.exists():
-        context.fallback_opens.pop(file_ref_id, None)
+        fallback_opens.pop(file_ref_id, None)
         return None
 
     if launch_in_default_app:
@@ -52,6 +57,7 @@ def get_cached_fallback_result(
 def open_file_fallback(
     context: VaultContext,
     *,
+    fallback_opens: FallbackOpens,
     file_service: "FileService",
     encryption_service: "EncryptionService",
     file_ref: Any,
@@ -67,7 +73,7 @@ def open_file_fallback(
         raise RuntimeError("Local data path is not set")
 
     cached = get_cached_fallback_result(
-        context,
+        fallback_opens,
         file_ref_id=file_ref.id,
         file_name=file_ref.name,
         launch_in_default_app=launch_in_default_app,
@@ -98,7 +104,7 @@ def open_file_fallback(
             file_id=file_entry.file_id,
         )
 
-        context.fallback_opens[file_ref.id] = PendingFallbackOpen(
+        fallback_opens[file_ref.id] = PendingFallbackOpen(
             file_ref_id=file_ref.id,
             file_name=file_ref.name,
             temp_path=temp_path,
@@ -123,13 +129,14 @@ def open_file_fallback(
                 temp_path.unlink()
             except OSError:
                 pass
-        context.fallback_opens.pop(file_ref.id, None)
+        fallback_opens.pop(file_ref.id, None)
         raise
 
 
 def finalize_fallback_open(
     context: VaultContext,
     *,
+    fallback_opens: FallbackOpens,
     file_service: "FileService",
     folder_service: "FolderService",
     encryption_service: "EncryptionService",
@@ -137,7 +144,7 @@ def finalize_fallback_open(
 ) -> str:
     """Save any changes from a fallback-opened temp file back to the vault and clean
     up."""
-    pending = context.fallback_opens.get(file_ref_id)
+    pending = fallback_opens.get(file_ref_id)
     if pending is None:
         raise FileNotFoundError("File is no longer unlocked")
 
@@ -169,7 +176,7 @@ def finalize_fallback_open(
 
         return "No changes detected. File unmounted"
     finally:
-        context.fallback_opens.pop(file_ref_id, None)
+        fallback_opens.pop(file_ref_id, None)
         if temp_path.exists():
             try:
                 temp_path.unlink()

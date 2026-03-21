@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from app.core.database.service.search import (
@@ -14,6 +16,7 @@ from app.core.service.indexing_service import IndexingService
 from app.core.service.models import (
     AddFileResult,
     OpenFileResult,
+    PendingFallbackOpen,
     SearchPage,
     SearchResult,
     UnlockedFileInfo,
@@ -25,6 +28,8 @@ from app.core.service.vault_file_mounts import reopen_mounted_file, unmount_moun
 from app.core.service.vault_file_opening import open_file_by_ref as open_file_from_vault
 from app.core.service.vault_file_sessions import (
     cleanup_unlocked_files,
+)
+from app.core.service.vault_file_sessions import (
     list_unlocked_files as list_unlocked_file_sessions,
 )
 
@@ -37,6 +42,7 @@ if TYPE_CHECKING:
 class VaultFileService:
     def __init__(self, context: VaultContext):
         self.context = context
+        self.fallback_opens: dict[int, PendingFallbackOpen] = {}
 
     def list_root_entries(self):
         """Return all top-level file and folder entries in the vault."""
@@ -47,6 +53,11 @@ class VaultFileService:
         """Return all child entries of the given folder."""
         folder_service = self._require_folder_service()
         return folder_service.get_children(parent_id)
+
+    def list_all_entries(self):
+        """Return all vault entries in tree order."""
+        folder_service = self._require_folder_service()
+        return folder_service.get_vault_tree()
 
     def add_file(
         self,
@@ -75,6 +86,7 @@ class VaultFileService:
         requested."""
         return open_file_from_vault(
             self.context,
+            fallback_opens=self.fallback_opens,
             file_service=self._require_file_service(),
             encryption_service=self._require_encryption_service(),
             file_ref_id=file_ref_id,
@@ -84,7 +96,26 @@ class VaultFileService:
     def list_unlocked_files(self) -> list[UnlockedFileInfo]:
         """Return all currently unlocked files from both FUSE mounts and fallback
         cache."""
-        return list_unlocked_file_sessions(self.context)
+        return list_unlocked_file_sessions(self.context, self.fallback_opens)
+
+    def get_file_reference_metadata(self, file_ref_id: int) -> dict:
+        """Return parsed metadata for a file reference."""
+        file_ref = self._require_file_service().get_file_reference_with_blobs(
+            file_ref_id
+        )
+        if file_ref is None:
+            raise FileNotFoundError(f"File reference not found: {file_ref_id}")
+        if file_ref.is_folder:
+            raise IsADirectoryError(f"Reference {file_ref_id} is a folder")
+        if file_ref.file_entry is None:
+            raise FileNotFoundError(
+                f"File entry not found for reference: {file_ref_id}"
+            )
+
+        metadata_json = file_ref.file_entry.metadata_json
+        if not metadata_json:
+            return {}
+        return json.loads(metadata_json)
 
     def search(self, query: str, limit: int = 20) -> list[SearchResult]:
         """Search indexed document content and resolve matches to visible file refs."""
@@ -102,6 +133,8 @@ class VaultFileService:
             return SearchPage(results=[], has_more=False)
         if self.context.session_factory is None:
             raise RuntimeError("Session factory is not initialized")
+
+        from sqlalchemy import select
 
         from app.core.database.model.file_reference import FileReference
 
@@ -126,15 +159,14 @@ class VaultFileService:
 
             fts_results = search_content(session, normalized, fetch_limit)
             for file_entry_id, snippet, rank in fts_results:
-                refs = (
-                    session.query(FileReference)
-                    .filter(
+                refs = session.scalars(
+                    select(FileReference)
+                    .where(
                         FileReference.file_entry_id == int(file_entry_id),
                         FileReference.is_folder.is_(False),
                     )
                     .order_by(FileReference.id)
-                    .all()
-                )
+                ).all()
                 for ref in refs:
                     if ref.id in seen_ref_ids:
                         continue
@@ -187,7 +219,7 @@ class VaultFileService:
         if mounted is not None:
             return mounted
 
-        pending = self.context.fallback_opens.get(file_ref_id)
+        pending = self.fallback_opens.get(file_ref_id)
         if pending and pending.temp_path.exists():
             from app.core.service.launcher_service import open_with_default_app
 
@@ -204,6 +236,7 @@ class VaultFileService:
 
         return finalize_fallback_open(
             self.context,
+            fallback_opens=self.fallback_opens,
             file_service=self._require_file_service(),
             folder_service=self._require_folder_service(),
             encryption_service=self._require_encryption_service(),
@@ -215,10 +248,127 @@ class VaultFileService:
         engine."""
         cleanup_unlocked_files(
             self.context,
+            fallback_opens=self.fallback_opens,
             file_service=self._require_file_service(),
             folder_service=self._require_folder_service(),
             encryption_service=self._require_encryption_service(),
         )
+
+    def copy_entry(
+        self,
+        source_virtual_path: str,
+        destination_folder_virtual_path: str = "/",
+        new_name: str | None = None,
+    ):
+        """Copy a file or folder inside the vault."""
+        source = self._get_entry_by_virtual_path(source_virtual_path)
+        if source is None:
+            raise FileNotFoundError(f"Vault entry not found: {source_virtual_path}")
+
+        destination_parent_id = self._get_destination_parent_id(
+            destination_folder_virtual_path
+        )
+        if source.is_folder and self._is_descendant_path(
+            destination_folder_virtual_path,
+            source.virtual_path,
+        ):
+            raise ValueError("Cannot copy a folder into itself or its descendant")
+
+        return self._copy_reference(
+            source.id,
+            destination_parent_id,
+            new_name=new_name,
+        )
+
+    def move_entries(
+        self,
+        source_virtual_paths: list[str],
+        destination_folder_virtual_path: str = "/",
+    ):
+        """Move multiple files or folders into another vault folder."""
+        if not source_virtual_paths:
+            return []
+
+        entries = self._resolve_entries(source_virtual_paths)
+        self._ensure_no_nested_selection(entries)
+        destination_parent_id = self._get_destination_parent_id(
+            destination_folder_virtual_path
+        )
+
+        names = [entry.name for entry in entries]
+        if len(set(names)) != len(names):
+            raise ValueError(
+                """Cannot move multiple entries with the same name
+                into one destination folder"""
+            )
+
+        folder_service = self._require_folder_service()
+        moving_ids = {entry.id for entry in entries}
+        for entry in entries:
+            existing = folder_service.get_child_by_name(
+                destination_parent_id, entry.name
+            )
+            if existing is not None and existing.id not in moving_ids:
+                raise FileExistsError(
+                    f"An entry named '{entry.name}' already exists in the destination"
+                )
+
+        moved = []
+        for entry in entries:
+            if entry.is_folder and self._is_descendant_path(
+                destination_folder_virtual_path,
+                entry.virtual_path,
+            ):
+                raise ValueError("Cannot move a folder into itself or its descendant")
+            folder_service.rename_entry(entry.id, entry.name, destination_parent_id)
+            moved.append(self._get_entry_by_id(entry.id))
+        return moved
+
+    def delete_entries(self, source_virtual_paths: list[str]) -> int:
+        """Delete one or more files or folders from the vault."""
+        if not source_virtual_paths:
+            return 0
+
+        entries = self._resolve_entries(source_virtual_paths)
+        entries = self._collapse_descendant_entries(entries)
+        folder_service = self._require_folder_service()
+        orphan_ids: list[int] = []
+        for entry in entries:
+            orphan_ids.extend(folder_service.delete_entry(entry.id))
+        folder_service.gc.cleanup_batch(orphan_ids)
+        return len(entries)
+
+    def rename_entry(self, source_virtual_path: str, new_name: str):
+        """Rename a single file or folder without changing its parent."""
+        source = self._get_entry_by_virtual_path(source_virtual_path)
+        if source is None:
+            raise FileNotFoundError(f"Vault entry not found: {source_virtual_path}")
+
+        self._require_folder_service().rename_entry(
+            source.id, new_name, source.parent_id
+        )
+        return self._get_entry_by_id(source.id)
+
+    def export_entries(
+        self,
+        source_virtual_paths: list[str],
+        destination_dir: Path,
+    ) -> list[Path]:
+        """Export one or more files or folders to a filesystem directory."""
+        if not source_virtual_paths:
+            return []
+
+        entries = self._resolve_entries(source_virtual_paths)
+        self._ensure_no_nested_selection(entries)
+
+        destination_root = Path(destination_dir)
+        destination_root.mkdir(parents=True, exist_ok=True)
+        exported: list[Path] = []
+        for entry in entries:
+            exported.append(
+                self._export_reference(entry.id, destination_root, override_name=None)
+            )
+        return exported
 
     def get_db_debug_info(self) -> dict:
         """Return debug information about the vault database path and encryption
@@ -274,8 +424,9 @@ class VaultFileService:
         if exact_index >= 0:
             return (
                 f"Filename: {file_name[:exact_index]}<b>{
-                    file_name[exact_index: exact_index + len(query)]}</b>"
-                f"{file_name[exact_index + len(query):]}"
+                    file_name[exact_index : exact_index + len(query)]
+                }</b>"
+                f"{file_name[exact_index + len(query) :]}"
             )
 
         lower_name = file_name.lower()
@@ -284,8 +435,9 @@ class VaultFileService:
         if lower_index >= 0:
             return (
                 f"Filename: {file_name[:lower_index]}<b>{
-                    file_name[lower_index: lower_index + len(query)]}</b>"
-                f"{file_name[lower_index + len(query):]}"
+                    file_name[lower_index : lower_index + len(query)]
+                }</b>"
+                f"{file_name[lower_index + len(query) :]}"
             )
 
         return f"Filename: {file_name}"
@@ -307,3 +459,150 @@ class VaultFileService:
         if self.context.encryption_service is None:
             raise RuntimeError("Encryption service is not initialized")
         return self.context.encryption_service
+
+    def _get_entry_by_id(self, ref_id: int):
+        entry = self._require_folder_service().get_by_id(ref_id)
+        if entry is None:
+            raise FileNotFoundError(f"Vault entry not found: {ref_id}")
+        return entry
+
+    def _get_entry_by_virtual_path(self, virtual_path: str):
+        normalized = self._normalize_vault_path(virtual_path)
+        return self._require_folder_service().get_by_virtual_path(normalized)
+
+    def _resolve_entries(self, source_virtual_paths: list[str]):
+        resolved = []
+        seen_paths: set[str] = set()
+        for path in source_virtual_paths:
+            entry = self._get_entry_by_virtual_path(path)
+            if entry is None:
+                raise FileNotFoundError(f"Vault entry not found: {path}")
+            if entry.virtual_path in seen_paths:
+                continue
+            seen_paths.add(entry.virtual_path)
+            resolved.append(entry)
+        return resolved
+
+    def _get_destination_parent_id(self, virtual_path: str) -> int | None:
+        normalized = self._normalize_vault_path(virtual_path)
+        if normalized == "/":
+            return None
+
+        folder = self._get_entry_by_virtual_path(normalized)
+        if folder is None:
+            raise FileNotFoundError(f"Destination folder not found: {virtual_path}")
+        if not folder.is_folder:
+            raise NotADirectoryError(f"Destination is not a folder: {virtual_path}")
+        return folder.id
+
+    @staticmethod
+    def _normalize_vault_path(path: str | None) -> str:
+        if path is None:
+            return "/"
+
+        normalized = path.strip().replace("\\", "/")
+        if not normalized:
+            return "/"
+
+        parts = [
+            segment for segment in normalized.split("/") if segment not in {"", "."}
+        ]
+        if any(segment == ".." for segment in parts):
+            raise ValueError("Parent traversal ('..') is not allowed")
+
+        if not parts:
+            return "/"
+        return "/" + "/".join(parts)
+
+    @staticmethod
+    def _is_descendant_path(candidate_path: str, parent_path: str) -> bool:
+        normalized_candidate = VaultFileService._normalize_vault_path(candidate_path)
+        normalized_parent = VaultFileService._normalize_vault_path(parent_path)
+        return (
+            normalized_candidate == normalized_parent
+            or normalized_candidate.startswith(normalized_parent + "/")
+        )
+
+    @staticmethod
+    def _ensure_no_nested_selection(entries) -> None:
+        ordered_paths = sorted(entry.virtual_path for entry in entries)
+        for index, path in enumerate(ordered_paths):
+            for later in ordered_paths[index + 1 :]:
+                if later.startswith(path + "/"):
+                    raise ValueError(
+                        "Nested selections are not allowed for this operation"
+                    )
+
+    @staticmethod
+    def _collapse_descendant_entries(entries):
+        kept = []
+        for entry in sorted(entries, key=lambda item: len(item.virtual_path)):
+            if any(
+                entry.virtual_path.startswith(parent.virtual_path + "/")
+                for parent in kept
+            ):
+                continue
+            kept.append(entry)
+        return kept
+
+    def _copy_reference(
+        self,
+        source_ref_id: int,
+        destination_parent_id: int | None,
+        *,
+        new_name: str | None = None,
+    ):
+        source = self._get_entry_by_id(source_ref_id)
+        target_name = new_name or source.name
+        if source.is_folder:
+            created_folder = self._require_folder_service().create_folder(
+                target_name,
+                destination_parent_id,
+            )
+            for child in self._require_folder_service().get_children(source.id):
+                self._copy_reference(child.id, created_folder.id)
+            return created_folder
+
+        if source.file_entry_id is None:
+            raise RuntimeError(f"File reference {source.id} has no file entry")
+        return self._require_file_service().create_file_reference(
+            name=target_name,
+            parent_id=destination_parent_id,
+            file_entry_id=source.file_entry_id,
+        )
+
+    def _export_reference(
+        self,
+        source_ref_id: int,
+        destination_parent: Path,
+        *,
+        override_name: str | None = None,
+    ) -> Path:
+        source = self._get_entry_by_id(source_ref_id)
+        target_path = destination_parent / (override_name or source.name)
+        if target_path.exists():
+            raise FileExistsError(f"Export destination already exists: {target_path}")
+        if source.is_folder:
+            target_path.mkdir(parents=True, exist_ok=False)
+            for child in self._require_folder_service().get_children(source.id):
+                self._export_reference(child.id, target_path)
+            return target_path
+
+        file_ref = self._require_file_service().get_file_reference_with_blobs(source.id)
+        if file_ref is None or file_ref.file_entry is None:
+            raise FileNotFoundError(f"Vault file not found: {source.virtual_path}")
+
+        vault_path = self.context.require_vault_path()
+        vault_id = self.context.require_vault_id().encode("utf-8")
+        master_key = self.context.require_master_key().view()
+        blob_ids = [blob.blob_id for blob in file_ref.file_entry.blobs]
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        self._require_encryption_service().decrypt_file(
+            vault_path=vault_path,
+            blob_ids=blob_ids,
+            output_path=target_path,
+            master_key=master_key,
+            vault_id=vault_id,
+            file_id=file_ref.file_entry.file_id,
+        )
+        return target_path

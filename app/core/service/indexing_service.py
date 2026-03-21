@@ -6,9 +6,11 @@ import secrets
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 from sqlalchemy.orm.exc import DetachedInstanceError
 
+from app.core.database.model.extraction_status import ExtractionStatus
 from app.core.database.service.search import (
     get_pending_extractions,
     insert_document_content,
@@ -17,6 +19,7 @@ from app.core.database.service.search import (
 from app.core.database.service.session import session_scope
 from app.core.runtime_layout import plaintext_staging_dir
 from app.core.service.extraction_service import ExtractionService
+from app.core.service.file_metadata_service import FileMetadataService
 from app.utils.logging import logger
 
 if TYPE_CHECKING:
@@ -46,10 +49,6 @@ class IndexingService:
 
     def index_file_entry(self, entry: "FileEntry", filename: str) -> bool:
         """Decrypt, extract, and index a file entry into the FTS table."""
-        if not ExtractionService.is_supported(filename):
-            logger.info(f"Indexing skipped for unsupported format: {filename}")
-            return False
-
         file_id, blob_ids = self._resolve_entry_payload(entry)
         if not blob_ids:
             logger.warning(f"Indexing skipped, no blobs available for entry {entry.id}")
@@ -62,16 +61,29 @@ class IndexingService:
                 f"filename={filename}, blobs={len(blob_ids)}"
             )
             temp_path = self._decrypt_to_temp(file_id, blob_ids, filename)
-            logger.info(f"Indexing decrypt complete: entry_id={entry.id}, temp={temp_path}")
+            logger.info(
+                f"Indexing decrypt complete: entry_id={entry.id}, temp={temp_path}"
+            )
+            metadata = self._extract_metadata(temp_path)
+            if not ExtractionService.is_supported(filename):
+                logger.info(f"Indexing skipped for unsupported format: {filename}")
+                self._set_status(
+                    entry.id,
+                    ExtractionStatus.UNSUPPORTED,
+                    preview="",
+                    metadata_json=json.dumps(metadata) if metadata else None,
+                )
+                return False
             result = ExtractionService.extract(temp_path)
-            return self._store_extraction_result(entry.id, filename, result)
+            return self._store_extraction_result(entry.id, filename, result, metadata)
         except Exception as exc:
             logger.exception(f"Indexing failed for {filename}: {exc}")
             try:
-                self._set_status(entry.id, "failed", preview="")
+                self._set_status(entry.id, ExtractionStatus.FAILED, preview="")
             except Exception:
                 logger.warning(
-                    f"Failed to update extraction status after indexing error: {entry.id}"
+                    "Failed to update extraction status after indexing error: "
+                    + str(entry.id)
                 )
             return False
         finally:
@@ -84,22 +96,33 @@ class IndexingService:
         filename: str,
     ) -> bool:
         """Index a newly imported plaintext source file directly."""
-        if not ExtractionService.is_supported(filename):
-            logger.info(f"Indexing skipped for unsupported format: {filename}")
-            return False
-
         path = Path(source_path)
         try:
             logger.info(
                 f"Indexing started from source file: entry_id={file_entry_id}, "
                 f"filename={filename}, source={path}"
             )
+            metadata = self._extract_metadata(path)
+            if not ExtractionService.is_supported(filename):
+                logger.info(f"Indexing skipped for unsupported format: {filename}")
+                self._set_status(
+                    file_entry_id,
+                    ExtractionStatus.UNSUPPORTED,
+                    preview="",
+                    metadata_json=json.dumps(metadata) if metadata else None,
+                )
+                return False
             result = ExtractionService.extract(path)
-            return self._store_extraction_result(file_entry_id, filename, result)
+            return self._store_extraction_result(
+                file_entry_id,
+                filename,
+                result,
+                metadata,
+            )
         except Exception as exc:
             logger.exception(f"Indexing failed for {filename} from source file: {exc}")
             try:
-                self._set_status(file_entry_id, "failed", preview="")
+                self._set_status(file_entry_id, ExtractionStatus.FAILED, preview="")
             except Exception:
                 logger.warning(
                     "Failed to update extraction status after indexing error: "
@@ -111,8 +134,16 @@ class IndexingService:
         with session_scope(self._session_factory, commit=False) as session:
             return get_pending_extractions(session, limit=limit)
 
-    def _store_extraction_result(self, file_entry_id: int, filename: str, result) -> bool:
-        metadata_json = json.dumps(result.metadata) if result.metadata else None
+    def _store_extraction_result(
+        self,
+        file_entry_id: int,
+        filename: str,
+        result,
+        base_metadata: dict | None = None,
+    ) -> bool:
+        merged_metadata = dict(base_metadata or {})
+        merged_metadata.update(result.metadata or {})
+        metadata_json = json.dumps(merged_metadata) if merged_metadata else None
         if result.error is not None:
             logger.warning(
                 f"Indexing extraction failed: entry_id={file_entry_id}, "
@@ -120,7 +151,7 @@ class IndexingService:
             )
             self._set_status(
                 file_entry_id,
-                "failed",
+                ExtractionStatus.FAILED,
                 preview="",
                 metadata_json=metadata_json,
             )
@@ -133,36 +164,46 @@ class IndexingService:
             )
             self._set_status(
                 file_entry_id,
-                "done",
+                ExtractionStatus.DONE,
                 preview=result.preview,
                 metadata_json=metadata_json,
             )
             return True
 
+        logger.info(
+            f"Indexing writing FTS content: entry_id={file_entry_id}, "
+            f"filename={filename}, chars={len(result.content)}"
+        )
         with session_scope(self._session_factory) as session:
-            logger.info(
-                f"Indexing writing FTS content: entry_id={file_entry_id}, "
-                f"filename={filename}, chars={len(result.content)}"
-            )
-            success = insert_document_content(session, str(file_entry_id), result.content)
+            success = insert_document_content(session, file_entry_id, result.content)
             update_extraction_status(
                 session,
                 file_entry_id,
-                "done" if success else "failed",
+                ExtractionStatus.DONE if success else ExtractionStatus.FAILED,
                 preview=result.preview,
                 metadata_json=metadata_json,
             )
-            if success:
-                logger.info(
-                    f"Indexing completed successfully: entry_id={file_entry_id}, "
-                    f"filename={filename}"
-                )
-            else:
-                logger.warning(
-                    f"Indexing failed during FTS insert: entry_id={file_entry_id}, "
-                    f"filename={filename}"
-                )
-            return success
+        if success:
+            logger.info(
+                f"Indexing completed successfully: entry_id={file_entry_id}, "
+                f"filename={filename}"
+            )
+        else:
+            logger.warning(
+                f"Indexing failed during FTS insert: entry_id={file_entry_id}, "
+                f"filename={filename}"
+            )
+        return success
+
+    @staticmethod
+    def _extract_metadata(file_path: Path) -> dict[str, object]:
+        metadata_result = FileMetadataService.extract(file_path)
+        if metadata_result.error is not None:
+            logger.warning(
+                f"Metadata extraction failed for {file_path}: {metadata_result.error}"
+            )
+            return {}
+        return metadata_result.metadata
 
     def _resolve_entry_payload(self, entry: "FileEntry") -> tuple[str, list[str]]:
         try:
@@ -177,12 +218,11 @@ class IndexingService:
         from app.core.database.model.file_entry import FileEntry
 
         with session_scope(self._session_factory, commit=False) as session:
-            loaded_entry = (
-                session.query(FileEntry)
+            loaded_entry = session.scalars(
+                select(FileEntry)
                 .options(joinedload(FileEntry.blobs))
-                .filter(FileEntry.id == entry.id)
-                .first()
-            )
+                .where(FileEntry.id == entry.id)
+            ).first()
 
             if loaded_entry is None:
                 raise FileNotFoundError(
@@ -191,7 +231,9 @@ class IndexingService:
 
             return loaded_entry.file_id, [blob.blob_id for blob in loaded_entry.blobs]
 
-    def _decrypt_to_temp(self, file_id: str, blob_ids: list[str], filename: str) -> Path:
+    def _decrypt_to_temp(
+        self, file_id: str, blob_ids: list[str], filename: str
+    ) -> Path:
         temp_dir = plaintext_staging_dir(self._cache_dir)
         suffix = Path(filename).suffix
         temp_path = temp_dir / f"_extract_{file_id}_{secrets.token_hex(8)}{suffix}"
@@ -212,7 +254,7 @@ class IndexingService:
     def _set_status(
         self,
         file_entry_id: int,
-        status: str,
+        status: ExtractionStatus,
         *,
         preview: str | None = None,
         metadata_json: str | None = None,
