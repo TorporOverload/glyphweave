@@ -37,11 +37,10 @@ def bootstrap_runtime_services(context: VaultContext) -> None:
 
     cache_dir = runtime_cache_dir(local_data_path)
     cache_dir.mkdir(parents=True, exist_ok=True)
-    session = context.session_factory()
     context.mounts = FuseOrchestrator(
         cache_dir=cache_dir,
         vault_path=vault_path,
-        db_session=session,
+        session_factory=context.session_factory,
         key_service=key_service,
         vault_id=vault_id.encode("utf-8"),
         master_key=master_key,

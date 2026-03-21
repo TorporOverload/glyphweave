@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set
 
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import sessionmaker
 
 from app.core.database.model.WAL_entry import WalEntry
@@ -162,16 +163,15 @@ class WalService:
             List of unflushed WalEntry records, ordered by id
         """
         with session_scope(self._session_factory, commit=False) as session:
-            return (
-                session.query(WalEntry)
-                .filter(
+            return list(session.scalars(
+                select(WalEntry)
+                .where(
                     WalEntry.file_reference_id == file_ref_id,
                     WalEntry.flushed.is_(False),
                 )
                 .order_by(WalEntry.id)
-                .all()
-            )
-
+            ).all()
+)
     def get_dirty_chunk_indices(self, file_ref_id: int) -> Set[int]:
         """
         Get set of chunk indices with pending writes.
@@ -185,17 +185,16 @@ class WalService:
             Set of chunk indices with unflushed write entries
         """
         with session_scope(self._session_factory, commit=False) as session:
-            entries = (
-                session.query(WalEntry.chunk_index)
-                .filter(
+            rows = session.execute(
+                select(WalEntry.chunk_index)
+                .where(
                     WalEntry.file_reference_id == file_ref_id,
                     WalEntry.operation == "write",
                     WalEntry.flushed.is_(False),
                 )
                 .distinct()
-                .all()
-            )
-            return {e[0] for e in entries}
+            ).all()
+            return {row[0] for row in rows}
 
     def mark_flushed(self, entry_ids: List[int]) -> None:
         """
@@ -213,13 +212,10 @@ class WalService:
 
         with session_scope(self._session_factory) as session:
             now = datetime.now(timezone.utc)
-            (
-                session.query(WalEntry)
-                .filter(WalEntry.id.in_(entry_ids))
-                .update(
-                    {"flushed": True, "flushed_at": now},
-                    synchronize_session=False,
-                )
+            session.execute(
+                update(WalEntry)
+                .where(WalEntry.id.in_(entry_ids))
+                .values(flushed=True, flushed_at=now)
             )
             session.flush()
 
@@ -241,14 +237,13 @@ class WalService:
         """
         with session_scope(self._session_factory) as session:
             # Get flushed entries
-            entries = (
-                session.query(WalEntry)
-                .filter(
+            entries = session.scalars(
+                select(WalEntry)
+                .where(
                     WalEntry.file_reference_id == file_ref_id,
                     WalEntry.flushed,
                 )
-                .all()
-            )
+            ).all()
 
             if not entries:
                 return 0
@@ -260,10 +255,8 @@ class WalService:
 
             # Delete entries
             entry_ids = [e.id for e in entries]
-            (
-                session.query(WalEntry)
-                .filter(WalEntry.id.in_(entry_ids))
-                .delete(synchronize_session=False)
+            session.execute(
+                delete(WalEntry).where(WalEntry.id.in_(entry_ids))
             )
             session.flush()
 
@@ -282,7 +275,9 @@ class WalService:
             Total number of entries deleted
         """
         with session_scope(self._session_factory) as session:
-            entries = session.query(WalEntry).filter(WalEntry.flushed.is_(True)).all()
+            entries = session.scalars(
+                select(WalEntry).where(WalEntry.flushed.is_(True))
+            ).all()
 
             if not entries:
                 return 0
@@ -294,10 +289,8 @@ class WalService:
 
             # Delete entries
             entry_ids = [e.id for e in entries]
-            (
-                session.query(WalEntry)
-                .filter(WalEntry.id.in_(entry_ids))
-                .delete(synchronize_session=False)
+            session.execute(
+                delete(WalEntry).where(WalEntry.id.in_(entry_ids))
             )
             session.flush()
 
@@ -314,12 +307,11 @@ class WalService:
             Dict mapping file_reference_id to list of unflushed entries
         """
         with session_scope(self._session_factory, commit=False) as session:
-            entries = (
-                session.query(WalEntry)
-                .filter(WalEntry.flushed.is_(False))
+            entries = session.scalars(
+                select(WalEntry)
+                .where(WalEntry.flushed.is_(False))
                 .order_by(WalEntry.file_reference_id, WalEntry.id)
-                .all()
-            )
+            ).all()
 
             result: Dict[int, List[WalEntry]] = {}
             for entry in entries:
@@ -388,10 +380,11 @@ class WalService:
             # Get all blob IDs currently in database
             db_blob_ids = {
                 row[0]
-                for row in session.query(WalEntry.temp_blob_id)
-                .filter(WalEntry.temp_blob_id != "")
-                .distinct()
-                .all()
+                for row in session.execute(
+                    select(WalEntry.temp_blob_id)
+                    .where(WalEntry.temp_blob_id != "")
+                    .distinct()
+                ).all()
             }
 
             return self.temp_store.cleanup_orphaned(db_blob_ids)
@@ -407,17 +400,30 @@ class WalService:
             True if there are pending writes
         """
         with session_scope(self._session_factory, commit=False) as session:
-            count = (
-                session.query(WalEntry)
-                .filter(
+            count = session.scalar(
+                select(func.count())
+                .select_from(WalEntry)
+                .where(
                     WalEntry.file_reference_id == file_ref_id,
                     WalEntry.flushed.is_(False),
                 )
-                .count()
             )
+            
+            if not count:
+                return False
+            
             return count > 0
 
     def count_pending(self) -> int:
         """Get total count of unflushed WAL entries."""
         with session_scope(self._session_factory, commit=False) as session:
-            return session.query(WalEntry).filter(WalEntry.flushed.is_(False)).count()
+            result = session.scalar(
+                select(func.count())
+                .select_from(WalEntry)
+                .where(WalEntry.flushed.is_(False))
+            )
+            
+            if not result:
+                return 0
+            
+            return result

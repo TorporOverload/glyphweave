@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from sqlalchemy import bindparam, delete, select, text
+from sqlalchemy import bindparam, delete, func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.database.model.file_blob_reference import FileBlobReference
@@ -34,13 +34,13 @@ class GarbageCollector:
 
         with session_scope(self._session_factory) as session:
             # Check if still referenced
-            ref_count = (
-                session.query(FileReference)
-                .filter(FileReference.file_entry_id == entry_id)
-                .count()
+            ref_count = session.scalar(
+                select(func.count())
+                .select_from(FileReference)
+                .where(FileReference.file_entry_id == entry_id)
             )
 
-            if ref_count > 0:
+            if ref_count and ref_count > 0:
                 logger.debug(
                     f"FileEntry {entry_id} still has {
                         ref_count
@@ -61,13 +61,39 @@ class GarbageCollector:
 
     def _cleanup_batch_in_session(self, session: Session, orphan_ids: list[int]) -> int:
         """Internal batch cleanup using an existing session."""
+        from app.core.database.model.file_reference import FileReference
+
         logger.debug(f"Cleaning up batch of {len(orphan_ids)} orphaned entries")
+        if not orphan_ids:
+            return 0
+
+        orphan_ids = sorted(set(orphan_ids))
+        live_entry_ids = set(
+            session.scalars(
+                select(FileReference.file_entry_id).where(
+                    FileReference.file_entry_id.in_(orphan_ids)
+                )
+            ).all()
+        )
+        removable_ids = [
+            entry_id for entry_id in orphan_ids if entry_id not in live_entry_ids
+        ]
+        skipped_ids = [
+            entry_id for entry_id in orphan_ids if entry_id in live_entry_ids
+        ]
+
+        if skipped_ids:
+            logger.debug(
+                f"Skipping cleanup for still-referenced file entries: {skipped_ids}"
+            )
+        if not removable_ids:
+            return 0
 
         # Collect all blob IDs for these entries
         blobs_to_delete = (
             session.execute(
                 select(FileBlobReference.blob_id).where(
-                    FileBlobReference.file_entry_id.in_(orphan_ids)
+                    FileBlobReference.file_entry_id.in_(removable_ids)
                 )
             )
             .scalars()
@@ -79,10 +105,10 @@ class GarbageCollector:
         # Delete Blob References
         session.execute(
             delete(FileBlobReference).where(
-                FileBlobReference.file_entry_id.in_(orphan_ids)
+                FileBlobReference.file_entry_id.in_(removable_ids)
             )
         )
-        logger.debug(f"Deleted blob references for {len(orphan_ids)} entries")
+        logger.debug(f"Deleted blob references for {len(removable_ids)} entries")
 
         # Delete Search Index (FTS5)
         try:
@@ -91,16 +117,18 @@ class GarbageCollector:
                 text("DELETE FROM search_index WHERE file_entry_id IN :ids").bindparams(
                     bindparam("ids", expanding=True)
                 ),
-                {"ids": orphan_ids},
+                {"ids": removable_ids},
             )
-            logger.debug(f"Deleted search index entries for {len(orphan_ids)} entries")
+            logger.debug(
+                f"Deleted search index entries for {len(removable_ids)} entries"
+            )
         except Exception as e:
             # FTS5 table may not exist
             logger.debug(f"Skipping search_index cleanup: {e}")
 
         # 3. Delete FileEntries
-        session.execute(delete(FileEntry).where(FileEntry.id.in_(orphan_ids)))
-        logger.debug(f"Deleted {len(orphan_ids)} file entries from database")
+        session.execute(delete(FileEntry).where(FileEntry.id.in_(removable_ids)))
+        logger.debug(f"Deleted {len(removable_ids)} file entries from database")
 
         session.flush()
 
@@ -115,10 +143,10 @@ class GarbageCollector:
                 logger.error(f"Failed to delete disk file {blob_id}: {e}")
 
         logger.info(
-            f"""Batch cleanup complete: {len(orphan_ids)} entries.
+            f"""Batch cleanup complete: {len(removable_ids)} entries.
             {deleted_count}/{len(blob_ids)} blobs removed from disk"""
         )
-        return len(orphan_ids)
+        return len(removable_ids)
 
     def full_gc_sweep(self) -> int:
         """Perform a full garbage collection sweep."""

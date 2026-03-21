@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 from app.core.service.models import OpenFileResult, VaultContext
 from app.core.service.vault_file_fallback import (
+    FallbackOpens,
     get_cached_fallback_result,
     open_file_fallback,
 )
@@ -20,6 +21,7 @@ if TYPE_CHECKING:
 def open_file_by_ref(
     context: VaultContext,
     *,
+    fallback_opens: FallbackOpens,
     file_service: "FileService",
     encryption_service: "EncryptionService",
     file_ref_id: int,
@@ -40,7 +42,7 @@ def open_file_by_ref(
         return mounted
 
     cached = get_cached_fallback_result(
-        context,
+        fallback_opens,
         file_ref_id=file_ref.id,
         file_name=file_ref.name,
         launch_in_default_app=launch_in_default_app,
@@ -58,6 +60,7 @@ def open_file_by_ref(
 
     return open_file_fallback(
         context,
+        fallback_opens=fallback_opens,
         file_service=file_service,
         encryption_service=encryption_service,
         file_ref=file_ref,

@@ -2,12 +2,20 @@
 
 from sqlalchemy import DDL, event
 
-from app.core.database.base import Base
+from app.core.database.base_model import Base
+from app.core.database.model.extraction_status import ExtractionStatus
 
 create_search_index_table = DDL("""
 CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
     file_entry_id UNINDEXED,
     content
+);
+""")
+
+create_search_filename_index_table = DDL("""
+CREATE VIRTUAL TABLE IF NOT EXISTS search_filename_index USING fts5(
+    file_ref_id UNINDEXED,
+    file_name
 );
 """)
 
@@ -18,7 +26,48 @@ CREATE TRIGGER IF NOT EXISTS trigger_delete_search_index AFTER DELETE ON file_en
     END;
 """)
 
-trigger_file_entry_content_changed = DDL("""
+trigger_search_filename_index_insert = DDL("""
+CREATE TRIGGER IF NOT EXISTS trigger_insert_search_filename_index
+    AFTER INSERT ON file_reference
+    FOR EACH ROW
+        BEGIN
+            INSERT INTO search_filename_index (file_ref_id, file_name)
+            VALUES (NEW.id, NEW.name);
+        END;
+""")
+
+trigger_search_filename_index_delete = DDL("""
+CREATE TRIGGER IF NOT EXISTS trigger_delete_search_filename_index
+    AFTER DELETE ON file_reference
+    FOR EACH ROW
+        BEGIN
+            DELETE FROM search_filename_index WHERE file_ref_id = OLD.id;
+        END;
+""")
+
+trigger_search_filename_index_update = DDL("""
+CREATE TRIGGER IF NOT EXISTS trigger_update_search_filename_index
+    AFTER UPDATE OF name ON file_reference
+    FOR EACH ROW
+        BEGIN
+            DELETE FROM search_filename_index WHERE file_ref_id = OLD.id;
+            INSERT INTO search_filename_index (file_ref_id, file_name)
+            VALUES (NEW.id, NEW.name);
+        END;
+""")
+
+sync_search_filename_index = DDL("""
+INSERT INTO search_filename_index (file_ref_id, file_name)
+SELECT fr.id, fr.name
+FROM file_reference AS fr
+WHERE NOT EXISTS (
+      SELECT 1
+      FROM search_filename_index AS sfi
+      WHERE sfi.file_ref_id = fr.id
+  );
+""")
+
+trigger_file_entry_content_changed = DDL(f"""
 CREATE TRIGGER IF NOT EXISTS trigger_file_entry_content_changed
     AFTER UPDATE OF content_hash ON file_entry
     FOR EACH ROW
@@ -29,14 +78,19 @@ CREATE TRIGGER IF NOT EXISTS trigger_file_entry_content_changed
 
             -- mark for re‑extraction / re‑index
             UPDATE file_entry
-            SET text_extraction_status = 'pending'
+            SET text_extraction_status = '{ExtractionStatus.PENDING.value}'
             WHERE id = NEW.id;
         END;
-""")
+""")  # noqa: S608
 
 
 def register_ddl_listeners():
     """Register all database views and triggers."""
     event.listen(Base.metadata, "after_create", create_search_index_table)
+    event.listen(Base.metadata, "after_create", create_search_filename_index_table)
     event.listen(Base.metadata, "after_create", trigger_search_index_delete)
+    event.listen(Base.metadata, "after_create", trigger_search_filename_index_insert)
+    event.listen(Base.metadata, "after_create", trigger_search_filename_index_delete)
+    event.listen(Base.metadata, "after_create", trigger_search_filename_index_update)
     event.listen(Base.metadata, "after_create", trigger_file_entry_content_changed)
+    event.listen(Base.metadata, "after_create", sync_search_filename_index)

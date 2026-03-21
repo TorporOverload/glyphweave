@@ -9,7 +9,8 @@ from sqlalchemy.orm import (
     relationship,
 )
 
-from app.core.database.base import Base
+from app.core.database.base_model import Base
+from app.core.database.model.extraction_status import ExtractionStatus
 
 if TYPE_CHECKING:
     from app.core.database.model.file_blob_reference import FileBlobReference
@@ -27,7 +28,9 @@ class FileEntry(Base):
     mime_type: Mapped[str] = mapped_column(String, nullable=False)
     encrypted_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     original_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
-    text_extraction_status: Mapped[str] = mapped_column(String, default="pending")
+    text_extraction_status: Mapped[str] = mapped_column(
+        String, default=ExtractionStatus.PENDING.value
+    )
     extracted_text_preview: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     metadata_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 

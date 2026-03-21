@@ -53,6 +53,22 @@ class AddFileResult:
     original_size: int
     encrypted_size: int
     blob_count: int
+    indexed: bool = False
+
+
+@dataclass
+class SearchResult:
+    file_ref_id: int
+    file_name: str
+    virtual_path: str
+    snippet: str
+    rank: float
+
+
+@dataclass
+class SearchPage:
+    results: list[SearchResult]
+    has_more: bool
 
 
 @dataclass
@@ -72,8 +88,6 @@ class VaultContext:
     folder_service: FolderService | None = None
     mounts: FuseOrchestrator | None = None
     master_key: SecureMemory | None = None
-
-    fallback_opens: dict[int, PendingFallbackOpen] = field(default_factory=dict)
 
     def require_vault_path(self) -> Path:
         """Return vault_path or raise RuntimeError if not set."""

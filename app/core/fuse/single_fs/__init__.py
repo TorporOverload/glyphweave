@@ -6,17 +6,13 @@ from pathlib import Path
 from typing import List
 
 from mfusepy import Operations
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker
 
 from app.core.crypto.constants import FUSE_CHUNK_SIZE
 from app.core.crypto.service.key_service import KeyService
-from app.core.database.service.file_service import FileService
-from app.core.database.service.folder_service import FolderService
-from app.core.database.service.gc_service import GarbageCollector
-from app.core.database.service.wal_service import WalService
 from app.core.fuse.chunk_store import ChunkStore
 from app.core.fuse.file_handle import FileHandleManager
-from app.core.fuse.temp_store import TempStore
+from app.core.fuse.services import build_fuse_services
 from app.core.fuse.types import FileMeta
 
 from .file_sync import open_main, read_full_file, refresh_after_flush, write_full_file
@@ -55,7 +51,7 @@ class SingleFileFS(Operations):
         mount_dir: Path,
         key_service: KeyService,
         vault_id: bytes,
-        db_session: Session,
+        session_factory: sessionmaker,
         master_key: bytes | None = None,
         chunk_size: int = FUSE_CHUNK_SIZE,
     ):
@@ -84,13 +80,18 @@ class SingleFileFS(Operations):
             mode=stat.S_IFREG | 0o777,
         )
 
-        engine = db_session.bind
-        self._session_factory = sessionmaker(
-            bind=engine, autoflush=False, autocommit=False
+        self._session_factory = session_factory
+        bundle = build_fuse_services(
+            session_factory=session_factory,
+            vault_path=vault_path,
+            cache_dir=cache_dir,
+            key_service=key_service,
         )
-        self.file_service = FileService(self._session_factory)
-        self.folder_service = FolderService(self._session_factory, vault_path)
-        self.gc = GarbageCollector(self._session_factory, vault_path)
+        self.file_service = bundle.file_service
+        self.folder_service = bundle.folder_service
+        self.gc = bundle.gc
+        self.temp_store = bundle.temp_store
+        self.wal_service = bundle.wal_service
 
         self.chunk_store = ChunkStore(
             vault_path=vault_path,
@@ -101,15 +102,6 @@ class SingleFileFS(Operations):
             folder_service=self.folder_service,
             gc=self.gc,
             chunk_size=chunk_size,
-        )
-
-        self.temp_store = TempStore(
-            cache_dir=cache_dir,
-            key_service=key_service,
-        )
-        self.wal_service = WalService(
-            session_factory=self._session_factory,
-            temp_store=self.temp_store,
         )
 
         self.handle_manager = FileHandleManager(

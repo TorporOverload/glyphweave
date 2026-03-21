@@ -7,7 +7,7 @@ from app.core.crypto.service.key_service import KeyService
 from app.core.crypto.service.utils import load_vault_key, save_vault_key
 from app.core.crypto.types import KDFParams, VaultKeyFile, WrappedKey
 from app.core.vault_layout import (
-    ensure_vault_layout,
+    create_vault_layout,
     metadata_path,
     vault_key_path,
 )
@@ -71,7 +71,7 @@ class VaultRuntimeService:
             vault_name=vault_name,
         )
 
-        ensure_vault_layout(vault_path)
+        create_vault_layout(vault_path)
         if self.context.local_data_path is None:
             raise RuntimeError("Local data path is not set")
         ensure_local_runtime_dirs(self.context.local_data_path)
@@ -115,7 +115,7 @@ class VaultRuntimeService:
         """Unlock an existing vault with the given password and initialize all
         services."""
         vault_path = self.context.require_vault_path()
-        ensure_vault_layout(vault_path)
+        create_vault_layout(vault_path)
         key_path = vault_key_path(vault_path)
         if not key_path.exists():
             raise FileNotFoundError(f"vault.key not found at {key_path}")
@@ -145,7 +145,7 @@ class VaultRuntimeService:
     ) -> None:
         """Reset the vault password using the recovery phrase and unlock the vault."""
         vault_path = self.context.require_vault_path()
-        ensure_vault_layout(vault_path)
+        create_vault_layout(vault_path)
         key_path = vault_key_path(vault_path)
         if not key_path.exists():
             raise FileNotFoundError(f"vault.key not found at {key_path}")

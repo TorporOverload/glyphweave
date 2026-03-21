@@ -7,105 +7,16 @@ the filesystem (which would require elevated permissions).
 
 import os
 import stat
-import time
+
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
-from app.core.fuse.single_fs import SingleFileFS
-from app.core.fuse.types import FileMeta
-
 
 class TestSingleFileFS:
     """Test suite for SingleFileFS."""
-
-    @pytest.fixture
-    def single_fs(
-        self,
-        encrypted_file_in_vault,
-        temp_vault_path,
-        temp_runtime_cache_dir,
-        temp_mount_path,
-        key_service,
-        test_vault_id,
-        test_master_key,
-        db_session,
-    ):
-        """Create a SingleFileFS instance with an encrypted file."""
-        file_ref, original_content = encrypted_file_in_vault
-        file_entry = file_ref.file_entry
-
-        # Get blob IDs in order
-        blob_ids = sorted(
-            [b.blob_id for b in file_entry.blobs],
-            key=lambda bid: next(
-                b.blob_index for b in file_entry.blobs if b.blob_id == bid
-            ),
-        )
-
-        fs = SingleFileFS(
-            file_name=file_ref.name,
-            file_id=file_entry.file_id,
-            file_ref_id=file_ref.id,
-            plaintext_size=file_entry.original_size_bytes,
-            blob_ids=blob_ids,
-            vault_path=temp_vault_path,
-            cache_dir=temp_runtime_cache_dir,
-            mount_dir=temp_mount_path,
-            key_service=key_service,
-            vault_id=test_vault_id,
-            db_session=db_session,
-            master_key=test_master_key,
-        )
-
-        yield fs, original_content
-
-        # Cleanup
-        fs.handle_manager.close_all(flush=False)
-
-    @pytest.fixture
-    def large_file_fs(
-        self,
-        encrypted_large_file_in_vault,
-        temp_vault_path,
-        temp_runtime_cache_dir,
-        temp_mount_path,
-        key_service,
-        test_vault_id,
-        test_master_key,
-        db_session,
-    ):
-        """Create a SingleFileFS with a large multi-chunk file."""
-        file_ref, original_content = encrypted_large_file_in_vault
-        file_entry = file_ref.file_entry
-
-        blob_ids = sorted(
-            [b.blob_id for b in file_entry.blobs],
-            key=lambda bid: next(
-                b.blob_index for b in file_entry.blobs if b.blob_id == bid
-            ),
-        )
-
-        fs = SingleFileFS(
-            file_name=file_ref.name,
-            file_id=file_entry.file_id,
-            file_ref_id=file_ref.id,
-            plaintext_size=file_entry.original_size_bytes,
-            blob_ids=blob_ids,
-            vault_path=temp_vault_path,
-            cache_dir=temp_runtime_cache_dir,
-            mount_dir=temp_mount_path,
-            key_service=key_service,
-            vault_id=test_vault_id,
-            db_session=db_session,
-            master_key=test_master_key,
-        )
-
-        yield fs, original_content
-
-        fs.handle_manager.close_all(flush=False)
 
     def test_getattr_root(self, single_fs):
         """Test getattr for root directory."""
@@ -400,6 +311,7 @@ class TestSingleFileFS:
         monkeypatch,
         temp_vault_path,
     ):
+        """Encrypted writes should stage plaintext under the runtime cache only."""
         captured = {}
 
         def fake_encrypt_file(
@@ -472,48 +384,6 @@ class TestSingleFileFS:
 
 class TestSingleFileFSLargeFile:
     """Tests specifically for large multi-chunk files."""
-
-    @pytest.fixture
-    def large_file_fs(
-        self,
-        encrypted_large_file_in_vault,
-        temp_vault_path,
-        temp_runtime_cache_dir,
-        temp_mount_path,
-        key_service,
-        test_vault_id,
-        test_master_key,
-        db_session,
-    ):
-        """Create a SingleFileFS with a large multi-chunk file."""
-        file_ref, original_content = encrypted_large_file_in_vault
-        file_entry = file_ref.file_entry
-
-        blob_ids = sorted(
-            [b.blob_id for b in file_entry.blobs],
-            key=lambda bid: next(
-                b.blob_index for b in file_entry.blobs if b.blob_id == bid
-            ),
-        )
-
-        fs = SingleFileFS(
-            file_name=file_ref.name,
-            file_id=file_entry.file_id,
-            file_ref_id=file_ref.id,
-            plaintext_size=file_entry.original_size_bytes,
-            blob_ids=blob_ids,
-            vault_path=temp_vault_path,
-            cache_dir=temp_runtime_cache_dir,
-            mount_dir=temp_mount_path,
-            key_service=key_service,
-            vault_id=test_vault_id,
-            db_session=db_session,
-            master_key=test_master_key,
-        )
-
-        yield fs, original_content
-
-        fs.handle_manager.close_all(flush=False)
 
     def test_read_large_file_full(self, large_file_fs):
         """Test reading entire large file."""
@@ -604,3 +474,175 @@ class TestSingleFileFSLargeFile:
             assert data == expected, f"Mismatch at offset {offset}"
 
         fs.release(f"/{fs.file_name}", fh)
+
+
+class TestSingleFileFSRoundtrip:
+    """Tests for write → flush → reopen → read-back data persistence."""
+
+    def test_write_release_reopen_roundtrip(self, single_fs):
+        """Write new content, release (flush to blobs), reopen, read back."""
+        fs, original_content = single_fs
+        new_content = b"Completely new file content after editing!"
+
+        # Write phase
+        fh = fs.open(f"/{fs.file_name}", flags=os.O_RDWR)
+        fs.write(f"/{fs.file_name}", new_content, 0, fh)
+        fs.truncate(f"/{fs.file_name}", len(new_content), fh)
+        fs.release(f"/{fs.file_name}", fh)
+
+        # Read-back phase: reopen and verify persisted data
+        fh2 = fs.open(f"/{fs.file_name}", flags=os.O_RDONLY)
+        data = fs.read(f"/{fs.file_name}", len(new_content) + 100, 0, fh2)
+        assert data == new_content
+        fs.release(f"/{fs.file_name}", fh2)
+
+    def test_overwrite_entire_file_roundtrip(self, single_fs):
+        """Truncate to 0, write new content, release, reopen, verify."""
+        fs, _ = single_fs
+        new_content = b"Replaced everything with this new data."
+
+        # Overwrite
+        fh = fs.open(f"/{fs.file_name}", flags=os.O_RDWR)
+        fs.truncate(f"/{fs.file_name}", 0, fh)
+        fs.write(f"/{fs.file_name}", new_content, 0, fh)
+        fs.truncate(f"/{fs.file_name}", len(new_content), fh)
+        fs.release(f"/{fs.file_name}", fh)
+
+        # Verify
+        fh2 = fs.open(f"/{fs.file_name}", flags=os.O_RDONLY)
+        data = fs.read(f"/{fs.file_name}", len(new_content) + 100, 0, fh2)
+        assert data == new_content
+        fs.release(f"/{fs.file_name}", fh2)
+
+    def test_write_release_reopen_large_file_roundtrip(self, large_file_fs):
+        """Multi-chunk write spanning boundaries, release, reopen, full read-back."""
+        fs, original_content = large_file_fs
+        chunk_size = fs.chunk_size
+
+        # Modify data spanning a chunk boundary
+        offset = chunk_size - 50
+        patch = b"X" * 200  # crosses from chunk 0 into chunk 1
+
+        fh = fs.open(f"/{fs.file_name}", flags=os.O_RDWR)
+        fs.write(f"/{fs.file_name}", patch, offset, fh)
+        fs.release(f"/{fs.file_name}", fh)
+
+        # Build expected content
+        expected = bytearray(original_content)
+        expected[offset : offset + len(patch)] = patch
+        expected = bytes(expected)
+
+        # Reopen and read back full file
+        fh2 = fs.open(f"/{fs.file_name}", flags=os.O_RDONLY)
+        read_offset = 0
+        data = bytearray()
+        while read_offset < len(expected):
+            chunk = fs.read(f"/{fs.file_name}", chunk_size, read_offset, fh2)
+            if not chunk:
+                break
+            data.extend(chunk)
+            read_offset += len(chunk)
+
+        assert bytes(data) == expected
+        fs.release(f"/{fs.file_name}", fh2)
+
+
+class TestSingleFileFSAtomicSave:
+    """Tests for the temp→main rename pattern used by Word/Adobe."""
+
+    def test_rename_temp_to_main_commits_content(self, single_fs):
+        """Renaming the temp save file over the main file should commit its content."""
+        fs, original_content = single_fs
+        new_content = b"New content written via temp file atomic save"
+
+        # Create temp and write to it
+        temp_fh = fs.create("/~WRD0000.tmp", mode=0o644)
+        fs.write("/~WRD0000.tmp", new_content, 0, temp_fh)
+        fs._temp_meta["~WRD0000.tmp"]["size"] = len(new_content)
+
+        # Rename temp → main (this calls _write_full_file internally)
+        fs.rename("/~WRD0000.tmp", f"/{fs.file_name}")
+
+        # Verify main file now has new content
+        fh = fs.open(f"/{fs.file_name}", flags=os.O_RDONLY)
+        data = fs.read(f"/{fs.file_name}", len(new_content) + 100, 0, fh)
+        assert data == new_content
+        fs.release(f"/{fs.file_name}", fh)
+
+        # Temp file should be gone
+        entries = fs.readdir("/", fh=0)
+        assert "~WRD0000.tmp" not in entries
+
+    def test_rename_main_to_temp_reads_content(self, single_fs):
+        """Rename main→temp, verify temp has original content in readdir."""
+        fs, original_content = single_fs
+
+        fs.rename(f"/{fs.file_name}", "/~WRL0001.tmp")
+
+        # Temp should exist in readdir
+        entries = fs.readdir("/", fh=0)
+        assert "~WRL0001.tmp" in entries
+
+        # Temp should contain the original file data
+        assert fs._temp_files["~WRL0001.tmp"] == bytearray(original_content)
+
+    def test_full_word_atomic_save_sequence(self, single_fs):
+        """Simulate the complete Word atomic save pattern."""
+        fs, original_content = single_fs
+        new_content = b"Document content after Word save"
+
+        # Step 1: Create temp write file
+        temp_fh = fs.create("/~WRD0000.tmp", mode=0o644)
+
+        # Step 2: Write new data to temp
+        fs.write("/~WRD0000.tmp", new_content, 0, temp_fh)
+        fs._temp_meta["~WRD0000.tmp"]["size"] = len(new_content)
+
+        # Step 3: Rename main → backup temp
+        fs.rename(f"/{fs.file_name}", "/~WRL0001.tmp")
+
+        # Step 4: Rename write-temp → main (atomic save)
+        fs.rename("/~WRD0000.tmp", f"/{fs.file_name}")
+
+        # Step 5: Delete backup
+        fs.unlink("/~WRL0001.tmp")
+
+        # Verify: main has new content
+        fh = fs.open(f"/{fs.file_name}", flags=os.O_RDONLY)
+        data = fs.read(f"/{fs.file_name}", len(new_content) + 100, 0, fh)
+        assert data == new_content
+        fs.release(f"/{fs.file_name}", fh)
+
+        # No temp files remain
+        entries = fs.readdir("/", fh=0)
+        assert "~WRD0000.tmp" not in entries
+        assert "~WRL0001.tmp" not in entries
+
+    def test_rename_temp_to_temp(self, single_fs):
+        """Rename one temp file to another temp name."""
+        fs, _ = single_fs
+        data = b"Temp file data"
+
+        temp_fh = fs.create("/source.tmp", mode=0o644)
+        fs.write("/source.tmp", data, 0, temp_fh)
+
+        fs.rename("/source.tmp", "/dest.tmp")
+
+        assert "source.tmp" not in fs._temp_files
+        assert fs._temp_files["dest.tmp"] == bytearray(data)
+
+    def test_destroy_cleans_up(self, single_fs):
+        """Verify destroy cleans up handles and temp files."""
+        fs, _ = single_fs
+
+        # Open main file
+        # fh = fs.open(f"/{fs.file_name}", flags=os.O_RDONLY)
+        # Create a temp file
+        fs.create("/temp.tmp", mode=0o644)
+
+        # Destroy
+        fs.destroy("/")
+
+        assert fs.handle_manager.open_handle_count == 0
+        assert fs._temp_files == {}
+        assert fs._temp_meta == {}

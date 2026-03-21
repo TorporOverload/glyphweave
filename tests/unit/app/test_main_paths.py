@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from app.cli import VaultCLI
+from app.core.service.safe_paths import safe_cache_path
 from app.utils.file_extensions import ensure_extension_from_mime
 
 
@@ -10,7 +10,7 @@ def test_safe_cache_path_strips_traversal_segments(tmp_path: Path):
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
 
-    safe_path = VaultCLI._safe_cache_path(cache_dir, "../outside.txt")
+    safe_path = safe_cache_path(cache_dir, "../outside.txt")
 
     assert safe_path.parent == cache_dir.resolve()
     assert safe_path.name == "outside.txt"
@@ -21,7 +21,7 @@ def test_safe_cache_path_rejects_invalid_names(tmp_path: Path):
     cache_dir.mkdir()
 
     with pytest.raises(ValueError, match="Invalid vault filename"):
-        VaultCLI._safe_cache_path(cache_dir, "..")
+        safe_cache_path(cache_dir, "..")
 
 
 def test_ensure_extension_from_mime_keeps_existing_extension():

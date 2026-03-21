@@ -35,7 +35,7 @@ def resolve_blob_path(vault_path: Path, blob_id: str) -> Path:
     """Return the full filesystem path for a blob given its ID."""
     return blobs_dir(vault_path) / blob_id
 
-def ensure_vault_layout(vault_path: Path) -> None:
+def create_vault_layout(vault_path: Path) -> None:
     """Create all required vault subdirectories if they do not already exist."""
     root = Path(vault_path)
     root.mkdir(parents=True, exist_ok=True)

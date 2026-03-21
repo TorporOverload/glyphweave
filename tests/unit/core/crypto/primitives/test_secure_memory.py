@@ -98,7 +98,7 @@ class TestSecureMemory:
         assert mem.is_cleared is True
 
     def test_secure_zero_static(self):
-        data = bytearray(b"sensitive_data")
+        data = bytearray("sensitive_data", 'utf-8')
         SecureMemory.secure_zero(data)
         assert data == bytearray(len(data))
         assert all(b == 0 for b in data)
