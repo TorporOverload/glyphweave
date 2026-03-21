@@ -4,6 +4,7 @@ records."""
 from datetime import datetime, timezone
 from typing import List, Optional
 
+from sqlalchemy import select
 from sqlalchemy.orm import joinedload, sessionmaker
 
 from app.core.database.model.file_blob_reference import FileBlobReference
@@ -17,6 +18,14 @@ class FileService:
     def __init__(self, session_factory: sessionmaker) -> None:
         self._session_factory = session_factory
 
+    @staticmethod
+    def _validate_entry_name(name: str) -> None:
+        normalized = name.strip()
+        if not normalized:
+            raise ValueError("Entry name cannot be empty")
+        if "/" in normalized or "\\" in normalized:
+            raise ValueError("Entry name cannot contain path separators")
+
     def get_file_entry_by_file_id(self, file_id: str) -> Optional[FileEntry]:
         """
         **For files only! not for folders**
@@ -29,12 +38,11 @@ class FileService:
             FileEntry or None
         """
         with session_scope(self._session_factory, commit=False) as session:
-            return (
-                session.query(FileEntry)
+            return session.scalars(
+                select(FileEntry)
                 .options(joinedload(FileEntry.blobs))
-                .filter_by(file_id=file_id)
-                .first()
-            )
+                .where(FileEntry.file_id == file_id)
+            ).unique().first()
 
     def find_by_content_hash(self, content_hash: str) -> Optional[FileEntry]:
         """
@@ -50,7 +58,9 @@ class FileService:
             Existing FileEntry with matching hash, or None
         """
         with session_scope(self._session_factory, commit=False) as session:
-            return session.query(FileEntry).filter_by(content_hash=content_hash).first()
+            return session.scalars(
+                select(FileEntry).where(FileEntry.content_hash == content_hash)
+            ).first()
 
     def create_file_entry_with_blobs(
         self,
@@ -120,14 +130,13 @@ class FileService:
             FileReference with file_entry.blobs loaded, or None
         """
         with session_scope(self._session_factory, commit=False) as session:
-            return (
-                session.query(FileReference)
+            return session.scalars(
+                select(FileReference)
                 .options(
                     joinedload(FileReference.file_entry).joinedload(FileEntry.blobs)
                 )
-                .filter(FileReference.id == ref_id)
-                .first()
-            )
+                .where(FileReference.id == ref_id)
+            ).unique().first()
 
     def update_file_reference_entry(
         self, ref_id: int, new_file_entry_id: int
@@ -180,6 +189,7 @@ class FileService:
             eagerly loaded via joinedload.
         """
         with session_scope(self._session_factory) as session:
+            self._validate_entry_name(name)
             parent_ref = None
             if parent_id is not None:
                 parent_ref = session.get(FileReference, parent_id)
@@ -190,6 +200,17 @@ class FileService:
                         f"Parent reference {parent_id} is not a folder"
                     )
 
+            existing = session.scalars(
+                select(FileReference).where(
+                    FileReference.parent_id == parent_id,
+                    FileReference.name == name,
+                )
+            ).first()
+            if existing is not None:
+                raise FileExistsError(
+                    f"An entry named '{name}' already exists in the destination"
+                )
+
             ref = FileReference(
                 name=name,
                 parent=parent_ref,
@@ -199,14 +220,13 @@ class FileService:
             session.add(ref)
             session.flush()
 
-            result = (
-                session.query(FileReference)
+            result = session.scalars(
+                select(FileReference)
                 .options(
                     joinedload(FileReference.file_entry).joinedload(FileEntry.blobs)
                 )
-                .filter(FileReference.id == ref.id)
-                .first()
-            )
+                .where(FileReference.id == ref.id)
+            ).unique().first()
 
             if result is None:
                 raise RuntimeError(
@@ -230,6 +250,7 @@ class FileService:
         import secrets
 
         with session_scope(self._session_factory) as session:
+            self._validate_entry_name(name)
             time_now = datetime.now(timezone.utc)
             file_id = secrets.token_hex(16)
 
@@ -242,6 +263,17 @@ class FileService:
                     raise NotADirectoryError(
                         f"Parent reference {parent_id} is not a folder"
                     )
+
+            existing = session.scalars(
+                select(FileReference).where(
+                    FileReference.parent_id == parent_id,
+                    FileReference.name == name,
+                )
+            ).first()
+            if existing is not None:
+                raise FileExistsError(
+                    f"An entry named '{name}' already exists in the destination"
+                )
 
             # Create an empty FileEntry
             # content_hash is NOT NULL + UNIQUE, so use sha256(file_id) as a
@@ -269,14 +301,13 @@ class FileService:
             session.flush()
 
             # Re-query with joinedload to properly populate file_entry
-            result = (
-                session.query(FileReference)
+            result = session.scalars(
+                select(FileReference)
                 .options(
                     joinedload(FileReference.file_entry).joinedload(FileEntry.blobs)
                 )
-                .filter(FileReference.id == file_ref.id)
-                .first()
-            )
+                .where(FileReference.id == file_ref.id)
+            ).unique().first()
 
             if result is None:
                 raise RuntimeError(

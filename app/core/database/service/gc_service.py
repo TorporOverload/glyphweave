@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from sqlalchemy import bindparam, delete, select, text
+from sqlalchemy import bindparam, delete, func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.database.model.file_blob_reference import FileBlobReference
@@ -34,13 +34,13 @@ class GarbageCollector:
 
         with session_scope(self._session_factory) as session:
             # Check if still referenced
-            ref_count = (
-                session.query(FileReference)
-                .filter(FileReference.file_entry_id == entry_id)
-                .count()
+            ref_count = session.scalar(
+                select(func.count())
+                .select_from(FileReference)
+                .where(FileReference.file_entry_id == entry_id)
             )
 
-            if ref_count > 0:
+            if ref_count and ref_count > 0:
                 logger.debug(
                     f"FileEntry {entry_id} still has {
                         ref_count

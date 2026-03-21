@@ -3,6 +3,7 @@
 from sqlalchemy import DDL, event
 
 from app.core.database.base_model import Base
+from app.core.database.model.extraction_status import ExtractionStatus
 
 create_search_index_table = DDL("""
 CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
@@ -66,7 +67,7 @@ WHERE NOT EXISTS (
   );
 """)
 
-trigger_file_entry_content_changed = DDL("""
+trigger_file_entry_content_changed = DDL(f"""
 CREATE TRIGGER IF NOT EXISTS trigger_file_entry_content_changed
     AFTER UPDATE OF content_hash ON file_entry
     FOR EACH ROW
@@ -77,10 +78,10 @@ CREATE TRIGGER IF NOT EXISTS trigger_file_entry_content_changed
 
             -- mark for re‑extraction / re‑index
             UPDATE file_entry
-            SET text_extraction_status = 'pending'
+            SET text_extraction_status = '{ExtractionStatus.PENDING.value}'
             WHERE id = NEW.id;
         END;
-""")
+""")  # noqa: S608
 
 
 def register_ddl_listeners():

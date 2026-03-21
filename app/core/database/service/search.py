@@ -1,11 +1,12 @@
-import time
 import re
+import time
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+from app.core.database.model.extraction_status import ExtractionStatus
 from app.utils.logging import logger
 
 if TYPE_CHECKING:
@@ -106,11 +107,12 @@ def _prepare_filename_match_query(text_value: str) -> str:
 
 
 def insert_document_content(
-    session: Session, file_entry_id: str, content: str, retries: int = 3
+    session: Session,
+    file_entry_id: int,
+    content: str,
+    retries: int = 3,
 ) -> bool:
     """Insert file content into the FTS index.
-
-    The caller owns the surrounding transaction and commit.
     """
     params = {"file_entry_id": file_entry_id, "content": content}
 
@@ -177,7 +179,7 @@ def search_file_references(
 def update_extraction_status(
     session: Session,
     file_entry_id: int,
-    status: str,
+    status: ExtractionStatus,
     preview: Optional[str] = None,
     metadata_json: Optional[str] = None,
 ) -> None:
@@ -188,7 +190,7 @@ def update_extraction_status(
     if entry is None:
         return
 
-    entry.text_extraction_status = status
+    entry.text_extraction_status = status.value
     if preview is not None:
         entry.extracted_text_preview = preview
     if metadata_json is not None:
@@ -203,13 +205,12 @@ def get_pending_extractions(
     """Return file entries pending text extraction."""
     from app.core.database.model.file_entry import FileEntry
 
-    return (
-        session.query(FileEntry)
-        .filter(FileEntry.text_extraction_status == "pending")
+    return list(session.scalars(
+        select(FileEntry)
+        .where(FileEntry.text_extraction_status == ExtractionStatus.PENDING.value)
         .order_by(FileEntry.id)
         .limit(limit)
-        .all()
-    )
+    ).all())
 
 
 def get_retriable_extractions(
@@ -221,14 +222,20 @@ def get_retriable_extractions(
 
     from app.core.database.model.file_entry import FileEntry
 
-    return (
-        session.query(FileEntry)
+    return list(session.scalars(
+        select(FileEntry)
         .options(
             joinedload(FileEntry.references),
             joinedload(FileEntry.blobs),
         )
-        .filter(FileEntry.text_extraction_status.in_(("pending", "failed")))
+        .where(
+            FileEntry.text_extraction_status.in_(
+                (
+                    ExtractionStatus.PENDING.value,
+                    ExtractionStatus.FAILED.value,
+                )
+            )
+        )
         .order_by(FileEntry.id)
         .limit(limit)
-        .all()
-    )
+    ).unique().all())

@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
+from sqlalchemy import select
 from sqlalchemy.orm import joinedload, sessionmaker
 
 from app.core.database.model.file_reference import FileReference
@@ -18,25 +19,31 @@ class FolderService:
         self.vault_path = vault_path
         self.gc = GarbageCollector(session_factory, vault_path)
 
+    @staticmethod
+    def _validate_entry_name(name: str) -> None:
+        normalized = name.strip()
+        if not normalized:
+            raise ValueError("Entry name cannot be empty")
+        if "/" in normalized or "\\" in normalized:
+            raise ValueError("Entry name cannot contain path separators")
+
     def get_root_entries(self) -> List[FileReference]:
         """Get files and folders at the root of the vault."""
         with session_scope(self._session_factory, commit=False) as session:
-            return (
-                session.query(FileReference)
+            return list( session.scalars(
+                select(FileReference)
                 .options(joinedload(FileReference.file_entry))
-                .filter(FileReference.parent_id.is_(None))
-                .all()
-            )
+                .where(FileReference.parent_id.is_(None))
+            ).unique().all() )
 
     def get_children(self, parent_id: int) -> List[FileReference]:
         """Get direct children for a folder."""
         with session_scope(self._session_factory, commit=False) as session:
-            return (
-                session.query(FileReference)
+            return list(session.scalars(
+                select(FileReference)
                 .options(joinedload(FileReference.file_entry))
-                .filter(FileReference.parent_id == parent_id)
-                .all()
-            )
+                .where(FileReference.parent_id == parent_id)
+            ).unique().all())
 
     def create_folder(
         self,
@@ -54,6 +61,7 @@ class FolderService:
             The created FileReference (is_folder=True)
         """
         with session_scope(self._session_factory) as session:
+            self._validate_entry_name(name)
             parent_ref = None
             if parent_id is not None:
                 parent_ref = session.get(FileReference, parent_id)
@@ -63,6 +71,17 @@ class FolderService:
                     raise NotADirectoryError(
                         f"Parent reference {parent_id} is not a folder"
                     )
+
+            existing = session.scalars(
+                select(FileReference).where(
+                    FileReference.parent_id == parent_id,
+                    FileReference.name == name,
+                )
+            ).first()
+            if existing is not None:
+                raise FileExistsError(
+                    f"An entry named '{name}' already exists in the destination"
+                )
 
             folder = FileReference(
                 name=name,
@@ -79,31 +98,28 @@ class FolderService:
     def get_by_id(self, ref_id: int) -> Optional[FileReference]:
         """Get a FileReference by ID with eager-loaded relationships."""
         with session_scope(self._session_factory, commit=False) as session:
-            return (
-                session.query(FileReference)
+            return session.scalars(
+                select(FileReference)
                 .options(joinedload(FileReference.file_entry))
-                .filter(FileReference.id == ref_id)
-                .first()
-            )
+                .where(FileReference.id == ref_id)
+            ).unique().first()
 
     def get_vault_tree(self) -> List[FileReference]:
         """Get the entire vault tree."""
         with session_scope(self._session_factory, commit=False) as session:
-            return (
-                session.query(FileReference)
+            return list(session.scalars(
+                select(FileReference)
                 .options(joinedload(FileReference.file_entry))
                 .order_by(FileReference.parent_id.asc().nullsfirst())
-                .all()
-            )
+            ).unique().all())
 
     def get_by_virtual_path(self, virtual_path: str) -> Optional[FileReference]:
         """Look up a FileReference by its virtual path."""
         with session_scope(self._session_factory, commit=False) as session:
-            return (
-                session.query(FileReference)
-                .filter(FileReference.virtual_path == virtual_path)
-                .first()
-            )
+            return session.scalars(
+                select(FileReference)
+                .where(FileReference.virtual_path == virtual_path)
+            ).first()
 
     def get_child_by_name(
         self,
@@ -112,28 +128,43 @@ class FolderService:
     ) -> Optional[FileReference]:
         """Find a direct child in the tree by parent and name."""
         with session_scope(self._session_factory, commit=False) as session:
-            return (
-                session.query(FileReference)
+            return session.scalars(
+                select(FileReference)
                 .options(joinedload(FileReference.file_entry))
-                .filter(
+                .where(
                     FileReference.parent_id == parent_id,
                     FileReference.name == name,
                 )
-                .first()
-            )
+            ).unique().first()
 
     def get_folder_id_by_path(self, virtual_path: str) -> Optional[int]:
         """Get the ID of a folder by its virtual path. Returns None if not found."""
         with session_scope(self._session_factory, commit=False) as session:
-            ref = (
-                session.query(FileReference.id)
-                .filter(
+            return session.scalar(
+                select(FileReference.id)
+                .where(
                     FileReference.virtual_path == virtual_path,
                     FileReference.is_folder.is_(True),
                 )
-                .first()
             )
-            return ref[0] if ref else None
+
+    def move_entry(
+        self,
+        ref_id: int,
+        name: str,
+        new_parent_id: int
+    ) -> None:
+        """
+        Move a file entity or a folder
+
+        Args:
+            ref_id: The FileReference to move
+            new_name: name
+            new_parent_id: New parent folder ID (None for root)
+            """
+        
+        self.rename_entry(ref_id, name, new_parent_id)
+
 
     def rename_entry(
         self,
@@ -142,7 +173,7 @@ class FolderService:
         new_parent_id: Optional[int],
     ) -> None:
         """
-        Re-name a file entity or a folder
+        Re-name or move a file entity or a folder
 
         Args:
             ref_id: The FileReference to rename/move
@@ -150,12 +181,43 @@ class FolderService:
             new_parent_id: New parent folder ID (None for root)
         """
         with session_scope(self._session_factory) as session:
+            self._validate_entry_name(new_name)
             ref = session.get(FileReference, ref_id)
             if not ref:
                 raise FileNotFoundError(f"FileReference {ref_id} not found")
 
+            current_virtual_path = ref.virtual_path
+            parent_ref = None
+            if new_parent_id is not None:
+                parent_ref = session.get(FileReference, new_parent_id)
+                if parent_ref is None:
+                    raise FileNotFoundError(f"Parent folder {new_parent_id} not found")
+                if not parent_ref.is_folder:
+                    raise NotADirectoryError(
+                        f"Parent reference {new_parent_id} is not a folder"
+                    )
+                if ref.is_folder and (
+                    parent_ref.id == ref.id
+                    or parent_ref.virtual_path.startswith(current_virtual_path + "/")
+                ):
+                    raise ValueError(
+                        "Cannot move a folder into itself or its descendant"
+                    )
+
+            existing = session.scalars(
+                select(FileReference).where(
+                    FileReference.parent_id == new_parent_id,
+                    FileReference.name == new_name,
+                    FileReference.id != ref_id,
+                )
+            ).first()
+            if existing is not None:
+                raise FileExistsError(
+                    f"An entry named '{new_name}' already exists in the destination"
+                )
+
             ref.name = new_name
-            ref.parent_id = new_parent_id
+            ref.parent = parent_ref
 
             session.flush()
             logger.debug(f"""Renamed FileReference {ref_id} to {new_name} -
@@ -184,11 +246,10 @@ class FolderService:
 
             if ref.is_folder:
                 # Get all descendants (files and folders) under this folder
-                descendants = (
-                    session.query(FileReference)
-                    .filter(FileReference.virtual_path.like(virtual_path + "/%"))
-                    .all()
-                )
+                descendants = session.scalars(
+                    select(FileReference)
+                    .where(FileReference.virtual_path.like(virtual_path + "/%"))
+                ).all()
 
                 # Collect file_entry_ids from files and delete descendants
                 for desc in descendants:

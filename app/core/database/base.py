@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
 from pathlib import Path
 
 import sqlcipher3
@@ -12,9 +11,6 @@ from app.core.database.base_model import Base
 from app.utils.logging import logger
 
 DB_FILENAME = "vault.db"
-
-engine = None
-
 
 from app.core.database.model import search_index  # noqa: F401, E402
 from app.core.database.model.file_blob_reference import FileBlobReference  # noqa: F401, E402
@@ -84,20 +80,3 @@ class DbBase:
         """Return a new database session."""
         return self.SessionLocal()
 
-    @contextmanager
-    def session_scope(self):
-        """Provide a transactional scope around a series of operations.
-
-        Yields a fresh session that auto-commits on success and
-        auto-rolls-back on error. The session is always closed on exit.
-        This prevents a failed operation from poisoning subsequent ones.
-        """
-        session = self.SessionLocal()
-        try:
-            yield session
-            session.commit()
-        except Exception:
-            session.rollback()
-            raise
-        finally:
-            session.close()
