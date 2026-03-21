@@ -33,17 +33,18 @@ class _FakeProcess:
 
 
 def _build_manager(tmp_path):
+    """Build a minimally wired orchestrator for mount lifecycle edge cases."""
     vault_path = tmp_path / "vault"
     vault_path.mkdir()
     cache_dir = tmp_path / "cache"
 
     engine = create_engine(f"sqlite:///{tmp_path / 'mounts.db'}")
-    session = sessionmaker(bind=engine, autoflush=False, autocommit=False)()
+    factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
     manager = FuseOrchestrator(
         cache_dir=cache_dir,
         vault_path=vault_path,
-        db_session=session,
+        session_factory=factory,
         key_service=cast(Any, _KeyService()),
         vault_id=b"vault-1",
         master_key=b"m" * 32,
@@ -63,6 +64,7 @@ def _build_manager(tmp_path):
 
 
 def test_mount_path_timeout_cleans_up_state(tmp_path, monkeypatch):
+    """A mount that never materializes on disk should tear down its subprocess state."""
     manager = _build_manager(tmp_path)
     proc = _FakeProcess()
 
@@ -85,6 +87,7 @@ def test_mount_path_timeout_cleans_up_state(tmp_path, monkeypatch):
 
 
 def test_mount_responsiveness_timeout_cleans_up_state(tmp_path, monkeypatch):
+    """A mount that appears but never becomes ready should still be fully cleaned up."""
     manager = _build_manager(tmp_path)
     proc = _FakeProcess()
 
@@ -112,6 +115,7 @@ def test_mount_responsiveness_timeout_cleans_up_state(tmp_path, monkeypatch):
 
 
 def test_windows_mount_process_uses_devnull_pipes(tmp_path, monkeypatch):
+    """Background mount processes should not inherit noisy stdout/stderr handles."""
     manager = _build_manager(tmp_path)
     proc = _FakeProcess()
 
@@ -143,6 +147,7 @@ def test_windows_mount_process_uses_devnull_pipes(tmp_path, monkeypatch):
 
 
 def test_windows_mount_process_receives_vaults_data_dir(tmp_path, monkeypatch):
+    """The spawned mount command should point back to the vaults data root."""
     manager = _build_manager(tmp_path)
     proc = _FakeProcess()
 

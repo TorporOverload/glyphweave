@@ -81,13 +81,14 @@ DHIVEHI_VOWEL_SIGNS = frozenset(
 )
 
 FTS_BOOLEAN_OPERATOR_PATTERN = re.compile(r"\b(?:AND|OR|NOT)\b")
+FTS_QUERY_TOKEN_PATTERN = re.compile(r"[^\W_]+", re.UNICODE)
 
 
 def _contains_dhivehi_vowel_signs(text_value: str) -> bool:
     return any(char in DHIVEHI_VOWEL_SIGNS for char in text_value)
 
 
-def _prepare_filename_match_query(text_value: str) -> str:
+def _prepare_fts_match_query(text_value: str, *, prefix_terms: bool) -> str:
     if (
         not text_value
         or '"' in text_value
@@ -99,11 +100,21 @@ def _prepare_filename_match_query(text_value: str) -> str:
     ):
         return text_value
 
-    terms = [term for term in text_value.split() if term]
+    terms = FTS_QUERY_TOKEN_PATTERN.findall(text_value)
     if not terms:
         return text_value
 
-    return " ".join(f"{term}*" for term in terms)
+    if prefix_terms:
+        return " ".join(f"{term}*" for term in terms)
+    return " ".join(terms)
+
+
+def _prepare_filename_match_query(text_value: str) -> str:
+    return _prepare_fts_match_query(text_value, prefix_terms=True)
+
+
+def _prepare_content_match_query(text_value: str) -> str:
+    return _prepare_fts_match_query(text_value, prefix_terms=False)
 
 
 def insert_document_content(
@@ -145,7 +156,7 @@ def search_content(
         return []
 
     statement = SEARCH_CONTENT_STATEMENT
-    params = {"query": normalized, "limit": limit}
+    params = {"query": _prepare_content_match_query(normalized), "limit": limit}
     if _contains_dhivehi_vowel_signs(normalized):
         statement = SEARCH_CONTENT_DHIVEHI_VOWEL_STATEMENT
         params["exact_query"] = normalized

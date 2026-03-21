@@ -265,7 +265,7 @@ class VaultFileService:
         if source is None:
             raise FileNotFoundError(f"Vault entry not found: {source_virtual_path}")
 
-        destination_parent_id = self._get_destination_parent_id(
+        destination_parent_id = self._resolve_or_create_destination_parent_id(
             destination_folder_virtual_path
         )
         if source.is_folder and self._is_descendant_path(
@@ -291,7 +291,7 @@ class VaultFileService:
 
         entries = self._resolve_entries(source_virtual_paths)
         self._ensure_no_nested_selection(entries)
-        destination_parent_id = self._get_destination_parent_id(
+        destination_parent_id = self._resolve_or_create_destination_parent_id(
             destination_folder_virtual_path
         )
 
@@ -494,6 +494,27 @@ class VaultFileService:
         if not folder.is_folder:
             raise NotADirectoryError(f"Destination is not a folder: {virtual_path}")
         return folder.id
+
+    def _resolve_or_create_destination_parent_id(self, virtual_path: str) -> int | None:
+        normalized = self._normalize_vault_path(virtual_path)
+        if normalized == "/":
+            return None
+
+        folder_service = self._require_folder_service()
+        parent_id: int | None = None
+        traversed: list[str] = []
+        for segment in normalized.strip("/").split("/"):
+            traversed.append(segment)
+            existing = folder_service.get_child_by_name(parent_id, segment)
+            if existing is None:
+                existing = folder_service.create_folder(segment, parent_id)
+            elif not existing.is_folder:
+                bad_path = "/" + "/".join(traversed)
+                raise NotADirectoryError(
+                    f"Destination path segment is not a folder: {bad_path}"
+                )
+            parent_id = existing.id
+        return parent_id
 
     @staticmethod
     def _normalize_vault_path(path: str | None) -> str:
