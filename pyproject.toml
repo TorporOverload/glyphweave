@@ -11,6 +11,7 @@ dependencies = [
     "mnemonic>=0.21",
     "sqlalchemy>=2.0.46",
     "sqlcipher3-wheels>=0.5.7",
+    "watchdog>=6.0.0",
 ]
 
 [project.scripts]

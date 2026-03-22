@@ -33,7 +33,7 @@ class VaultRuntimeService:
 
     def load_known_vaults(self) -> list[dict]:
         """Return the list of all registered vaults from the registry."""
-        return load_registry()
+        return load_registry(self.context.app_data_dir)
 
     def prepare_existing_vault(
         self,
@@ -48,6 +48,28 @@ class VaultRuntimeService:
             fallback_alias,
             fallback_vault_id,
         )
+
+    def import_vault(
+        self,
+        vault_path: Path,
+        fallback_alias: str | None = None,
+        fallback_vault_id: str | None = None,
+    ) -> dict[str, str]:
+        """Register an existing vault that is not yet present in the local registry."""
+        self.prepare_existing_vault(vault_path, fallback_alias, fallback_vault_id)
+        vault_id = self.context.require_vault_id()
+        vault_name = self.context.vault_name or fallback_alias or vault_path.name
+        upsert_registry(
+            vault_id,
+            vault_name,
+            str(vault_path),
+            self.context.app_data_dir,
+        )
+        return {
+            "vault_id": vault_id,
+            "vault_alias": vault_name,
+            "path": str(vault_path),
+        }
 
     def create_new_vault(
         self,
@@ -108,7 +130,7 @@ class VaultRuntimeService:
         )
 
         self._init_services()
-        upsert_registry(vault_id, vault_name, str(vault_path))
+        upsert_registry(vault_id, vault_name, str(vault_path), self.context.app_data_dir)
         return recovery_phrase
 
     def open_existing_vault(self, password: str) -> None:
@@ -136,6 +158,7 @@ class VaultRuntimeService:
             vault_id,
             self.context.vault_name or vault_path.name,
             str(vault_path),
+            self.context.app_data_dir,
         )
 
     def recover_with_recovery_phrase(
@@ -171,6 +194,7 @@ class VaultRuntimeService:
             vault_id,
             self.context.vault_name or vault_path.name,
             str(vault_path),
+            self.context.app_data_dir,
         )
 
     def _init_services(self) -> None:

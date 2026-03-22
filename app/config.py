@@ -4,6 +4,8 @@ import os
 import json
 from pathlib import Path
 
+from app.core.device_id import ensure_device_id
+
 APP_DATA_ENV_VAR = "GLYPHWEAVE_APP_DATA_DIR"
 VAULTS_DATA_ENV_VAR = "GLYPHWEAVE_LOCAL_DIR"
 DEFAULT_APP_DATA_DIR = Path.home() / ".glyphweave"
@@ -50,9 +52,6 @@ def ensure_app_data_layout(app_data_dir: Path | None = None) -> Path:
 
     _ensure_json_file(root / VAULTS_REGISTRY_FILE, [])
     _ensure_json_file(root / APP_CONFIG_FILE, {})
-    _ensure_json_file(
-        root / DEVICE_FILE,
-        {"device_id": None, "name": None, "status": "inactive"},
-    )
+    ensure_device_id(root)
 
     return root

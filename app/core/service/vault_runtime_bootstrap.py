@@ -2,10 +2,18 @@ from __future__ import annotations
 
 from app.core.crypto.service.encryption_service import EncryptionService
 from app.core.database.base import DbBase
+from app.core.database.service.search import get_retriable_extractions
 from app.core.database.service.file_service import FileService
 from app.core.database.service.folder_service import FolderService
+from app.core.database.service.session import session_scope
+from app.core.database.service.sync_bootstrap import bootstrap_file_reference_node_ids
 from app.core.fuse.fuse_orchestrator import FuseOrchestrator
 from app.core.runtime_layout import runtime_cache_dir
+from app.core.service.db_dump_service import install_db_dump_hook, restore_latest_db_dump
+from app.core.service.extraction_service import ExtractionService
+from app.core.service.indexing_service import IndexingService
+from app.core.sync.replay import replay_vault_events
+from app.core.sync.runtime import EventReplayRuntime
 
 from .models import VaultContext
 
@@ -25,6 +33,13 @@ def bootstrap_runtime_services(context: VaultContext) -> None:
     vaults_data_dir = context.app_data_dir / "vaults"
 
     context.db_key_hex = key_service.derive_database_key()
+    db_path = DbBase.resolve_db_path(vault_id, vaults_data_dir)
+    if not db_path.exists() or db_path.stat().st_size == 0:
+        restore_latest_db_dump(
+            vault_path=vault_path,
+            db_path=db_path,
+            db_key_hex=context.db_key_hex,
+        )
     context.db = DbBase(
         vault_id,
         context.db_key_hex,
@@ -32,8 +47,28 @@ def bootstrap_runtime_services(context: VaultContext) -> None:
     )
     context.encryption_service = EncryptionService()
     context.session_factory = context.db.SessionLocal
+    bootstrap_file_reference_node_ids(context.session_factory)
+    replay_vault_events(
+        session_factory=context.session_factory,
+        vault_path=vault_path,
+    )
+    dump_service = install_db_dump_hook(
+        session_factory=context.session_factory,
+        vault_path=vault_path,
+        db_path=context.db.db_path,
+        db_key_hex=context.db_key_hex,
+        app_data_dir=context.app_data_dir,
+    )
+    dump_service.maybe_create_dump()
     context.file_service = FileService(context.session_factory)
     context.folder_service = FolderService(context.session_factory, vault_path)
+    _index_replayed_entries(context)
+    if context.event_replay_runtime is None:
+        context.event_replay_runtime = EventReplayRuntime(
+            context=context,
+            on_replayed=_index_replayed_entries,
+        )
+    context.event_replay_runtime.start()
 
     cache_dir = runtime_cache_dir(local_data_path)
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -45,3 +80,41 @@ def bootstrap_runtime_services(context: VaultContext) -> None:
         vault_id=vault_id.encode("utf-8"),
         master_key=master_key,
     )
+
+
+def _index_replayed_entries(context: VaultContext) -> None:
+    local_data_path = context.local_data_path
+    if (
+        context.session_factory is None
+        or context.encryption_service is None
+        or context.vault_path is None
+        or context.vault_id is None
+        or context.master_key is None
+        or local_data_path is None
+    ):
+        return
+
+    indexing_service = IndexingService(
+        session_factory=context.session_factory,
+        encryption_service=context.encryption_service,
+        vault_path=context.vault_path,
+        cache_dir=runtime_cache_dir(local_data_path),
+        master_key=context.master_key.view(),
+        vault_id=context.vault_id,
+    )
+    with session_scope(context.session_factory, commit=False) as session:
+        entries = get_retriable_extractions(session, limit=500)
+
+    for entry in entries:
+        filename = _select_supported_reference_name(entry)
+        if filename is None:
+            continue
+        indexing_service.index_file_entry(entry, filename)
+
+
+def _select_supported_reference_name(entry) -> str | None:
+    for ref in getattr(entry, "references", []):
+        name = getattr(ref, "name", "")
+        if name and ExtractionService.is_supported(name):
+            return name
+    return None

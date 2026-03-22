@@ -26,6 +26,7 @@ def render_setup_vault_lines(known_vaults: list[dict]) -> list[str]:
     lines = render_known_vault_lines(known_vaults)
     lines.extend(
         [
+            "  97. Import existing vault",
             "  98. Recover vault with recovery phrase",
             "  99. Create new vault",
         ]
@@ -86,6 +87,17 @@ def render_available_file_lines(file_refs: Sequence[Any]) -> list[str]:
         f"  {index}. {ref.name}{_size_suffix(ref)}"
         for index, ref in enumerate(file_refs, 1)
     ]
+
+
+def render_directory_entry_lines(entries: Sequence[Any]) -> list[str]:
+    """Return numbered display lines for a single directory listing."""
+    lines: list[str] = []
+    for index, ref in enumerate(entries, 1):
+        if ref.is_folder:
+            lines.append(f"  {index}. [DIR] {ref.name}")
+        else:
+            lines.append(f"  {index}. {ref.name}{_size_suffix(ref)}")
+    return lines
 
 
 def render_unlocked_file_lines(unlocked_items: Sequence[Any]) -> list[str]:
@@ -189,6 +201,11 @@ class VaultCLI:
                     return True
                 continue
 
+            if choice == "97":
+                if self._import_vault_interactive():
+                    return True
+                continue
+
             if choice == "98":
                 if self.recover_vault_with_recovery_phrase(known):
                     return True
@@ -280,6 +297,38 @@ class VaultCLI:
         print("\nVault created successfully!")
         print(f"  Vault dir  : {self.service.vault_path}")
         print(f"  Local data : {self.service.context.local_data_path}")
+        return True
+
+    def _import_vault_interactive(self) -> bool:
+        """Register and unlock an existing vault from an arbitrary filesystem path."""
+        print("\n=== Import Existing Vault ===\n")
+
+        location_input = input("Enter vault directory path: ").strip().strip('"')
+        if not location_input:
+            print("No vault directory provided.")
+            return False
+
+        vault_path = Path(location_input)
+        alias_input = input("Override vault display name (blank to keep stored name): ").strip()
+        fallback_alias = alias_input or None
+
+        try:
+            imported = self.service.import_vault(vault_path, fallback_alias)
+            print(f"Imported vault: {imported['vault_alias']}")
+        except Exception as e:
+            print(f"\nFailed to import vault: {e}")
+            logger.exception("Failed to import vault")
+            return False
+
+        try:
+            password = getpass("Enter vault password: ")
+            self.service.open_existing_vault(password)
+        except Exception as e:
+            print(f"\nFailed to unlock imported vault: {e}")
+            logger.exception("Failed to unlock imported vault")
+            return False
+
+        print("\nVault imported and unlocked successfully")
         return True
 
     def recover_vault_with_recovery_phrase(self, known_vaults: list[dict]) -> bool:
@@ -381,41 +430,74 @@ class VaultCLI:
             logger.exception("Failed to add file")
 
     def open_file(self) -> None:
-        """Interactively select and open a file from the vault."""
+        """Interactively browse the vault tree and open a file."""
         print("\n=== Open File from Vault ===\n")
 
         try:
-            root_entries = self.service.list_root_entries()
+            current_entries = list(self.service.list_root_entries())
         except Exception as e:
             print(f"Failed to load files: {e}")
             return
 
-        file_refs = [r for r in root_entries if not r.is_folder]
-        if not file_refs:
-            print("No files in vault.")
+        current_path = "/"
+        history: list[tuple[str, list[Any]]] = []
+
+        while True:
+            print(f"Current directory: {current_path}")
+            if current_entries:
+                self._print_lines(render_directory_entry_lines(current_entries))
+            else:
+                print("  (empty)")
+
+            if history:
+                print("  b. Go to parent directory")
+            print("  [blank]. Cancel")
+
+            choice = input("\nEnter selection: ").strip()
+            if not choice:
+                return
+            if choice.lower() == "b":
+                if history:
+                    current_path, current_entries = history.pop()
+                else:
+                    print("Already at root.")
+                continue
+
+            selected = select_file_by_choice(choice, current_entries)
+            if not selected:
+                print(f"Entry not found: {choice}")
+                continue
+
+            if selected.is_folder:
+                try:
+                    child_entries = list(self.service.list_children(selected.id))
+                except Exception as e:
+                    print(f"\nError opening folder: {e}")
+                    logger.exception("Failed to browse folder")
+                    continue
+
+                history.append((current_path, current_entries))
+                current_path = (
+                    f"/{selected.name}"
+                    if current_path == "/"
+                    else f"{current_path}/{selected.name}"
+                )
+                current_entries = child_entries
+                continue
+
+            try:
+                result = self.service.open_file_by_ref(
+                    file_ref_id=selected.id,
+                    launch_in_default_app=True,
+                )
+            except Exception as e:
+                print(f"\nError opening file: {e}")
+                logger.exception("Failed to open file")
+                return
+
+            print(f"\n{result.message}")
+            print("Use 'List unlocked files' to open again or unmount it.")
             return
-
-        print("Available files:")
-        self._print_lines(render_available_file_lines(file_refs))
-
-        choice = input("\nEnter file number or name: ").strip()
-        selected = select_file_by_choice(choice, file_refs)
-        if not selected:
-            print(f"File not found: {choice}")
-            return
-
-        try:
-            result = self.service.open_file_by_ref(
-                file_ref_id=selected.id,
-                launch_in_default_app=True,
-            )
-        except Exception as e:
-            print(f"\nError opening file: {e}")
-            logger.exception("Failed to open file")
-            return
-
-        print(f"\n{result.message}")
-        print("Use 'List unlocked files' to open again or unmount it.")
 
     def list_unlocked_files(self) -> None:
         """Display all unlocked files and let the user reopen or unmount one."""

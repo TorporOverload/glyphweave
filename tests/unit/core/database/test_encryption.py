@@ -95,6 +95,9 @@ def test_database_encryption(tmp_path):
         "file_blob_reference",
         "wal_entries",
         "search_index",
+        "processed_event",
+        "sync_node_state",
+        "sync_tombstone",
     ]
 
     with db.engine.connect() as conn:

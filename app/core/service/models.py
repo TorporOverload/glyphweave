@@ -14,6 +14,8 @@ if TYPE_CHECKING:
     from app.core.database.service.file_service import FileService
     from app.core.database.service.folder_service import FolderService
     from app.core.fuse.fuse_orchestrator import FuseOrchestrator
+    from app.core.sync.event_emitter import EventEmitter
+    from app.core.sync.runtime import EventReplayRuntime
 
 
 @dataclass
@@ -88,6 +90,8 @@ class VaultContext:
     folder_service: FolderService | None = None
     mounts: FuseOrchestrator | None = None
     master_key: SecureMemory | None = None
+    event_emitter: EventEmitter | None = None
+    event_replay_runtime: EventReplayRuntime | None = None
 
     def require_vault_path(self) -> Path:
         """Return vault_path or raise RuntimeError if not set."""

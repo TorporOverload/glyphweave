@@ -22,6 +22,7 @@ from app.core.service.models import (
     UnlockedFileInfo,
     VaultContext,
 )
+from app.core.sync.event_emitter import EventEmitter
 from app.core.service.vault_file_fallback import finalize_fallback_open
 from app.core.service.vault_file_import import add_file as add_file_to_vault
 from app.core.service.vault_file_mounts import reopen_mounted_file, unmount_mounted_file
@@ -72,6 +73,7 @@ class VaultFileService:
             folder_service=self._require_folder_service(),
             encryption_service=self._require_encryption_service(),
             indexing_service=self._build_indexing_service(),
+            event_emitter=self._build_event_emitter(),
             source=source,
             dest_name=dest_name,
             dest_parent_virtual_path=dest_parent_virtual_path,
@@ -240,12 +242,17 @@ class VaultFileService:
             file_service=self._require_file_service(),
             folder_service=self._require_folder_service(),
             encryption_service=self._require_encryption_service(),
+            event_emitter=self._build_event_emitter(),
             file_ref_id=file_ref_id,
         )
 
     def cleanup(self) -> None:
         """Finalize all open files, unmount FUSE filesystems, and dispose the database
         engine."""
+        runtime = self.context.event_replay_runtime
+        if runtime is not None:
+            runtime.stop()
+            self.context.event_replay_runtime = None
         cleanup_unlocked_files(
             self.context,
             fallback_opens=self.fallback_opens,
@@ -321,7 +328,9 @@ class VaultFileService:
             ):
                 raise ValueError("Cannot move a folder into itself or its descendant")
             folder_service.rename_entry(entry.id, entry.name, destination_parent_id)
-            moved.append(self._get_entry_by_id(entry.id))
+            updated_entry = self._get_entry_by_id(entry.id)
+            self._emit_move_event(updated_entry, destination_parent_id, entry.name)
+            moved.append(updated_entry)
         return moved
 
     def delete_entries(self, source_virtual_paths: list[str]) -> int:
@@ -332,8 +341,11 @@ class VaultFileService:
         entries = self._resolve_entries(source_virtual_paths)
         entries = self._collapse_descendant_entries(entries)
         folder_service = self._require_folder_service()
+        event_emitter = self._build_event_emitter()
         orphan_ids: list[int] = []
         for entry in entries:
+            if event_emitter is not None:
+                self._emit_delete_event(entry)
             orphan_ids.extend(folder_service.delete_entry(entry.id))
         folder_service.gc.cleanup_batch(orphan_ids)
         return len(entries)
@@ -347,7 +359,9 @@ class VaultFileService:
         self._require_folder_service().rename_entry(
             source.id, new_name, source.parent_id
         )
-        return self._get_entry_by_id(source.id)
+        updated_entry = self._get_entry_by_id(source.id)
+        self._emit_move_event(updated_entry, source.parent_id, new_name)
+        return updated_entry
 
     def export_entries(
         self,
@@ -409,6 +423,17 @@ class VaultFileService:
             master_key=self.context.master_key.view(),
             vault_id=self.context.vault_id,
         )
+
+    def _build_event_emitter(self) -> EventEmitter | None:
+        if self.context.event_emitter is not None:
+            return self.context.event_emitter
+        if self.context.vault_path is None:
+            return None
+        self.context.event_emitter = EventEmitter(
+            vault_path=self.context.vault_path,
+            app_data_dir=self.context.app_data_dir,
+        )
+        return self.context.event_emitter
 
     @staticmethod
     def _select_supported_reference_name(entry) -> str | None:
@@ -501,6 +526,7 @@ class VaultFileService:
             return None
 
         folder_service = self._require_folder_service()
+        event_emitter = self._build_event_emitter()
         parent_id: int | None = None
         traversed: list[str] = []
         for segment in normalized.strip("/").split("/"):
@@ -508,6 +534,8 @@ class VaultFileService:
             existing = folder_service.get_child_by_name(parent_id, segment)
             if existing is None:
                 existing = folder_service.create_folder(segment, parent_id)
+                if event_emitter is not None:
+                    event_emitter.emit_folder_create(existing)
             elif not existing.is_folder:
                 bad_path = "/" + "/".join(traversed)
                 raise NotADirectoryError(
@@ -515,6 +543,46 @@ class VaultFileService:
                 )
             parent_id = existing.id
         return parent_id
+
+    def _emit_move_event(
+        self,
+        entry,
+        destination_parent_id: int | None,
+        new_name: str,
+    ) -> None:
+        event_emitter = self._build_event_emitter()
+        if event_emitter is None:
+            return
+        parent_node_id = None
+        if destination_parent_id is not None:
+            parent = self._get_entry_by_id(destination_parent_id)
+            parent_node_id = parent.node_id
+        if entry.is_folder:
+            event_emitter.emit_folder_move(
+                entry,
+                new_parent_node_id=parent_node_id,
+                new_name=new_name,
+            )
+        else:
+            event_emitter.emit_file_move(
+                entry,
+                new_parent_node_id=parent_node_id,
+                new_name=new_name,
+            )
+
+    def _emit_delete_event(self, entry) -> None:
+        event_emitter = self._build_event_emitter()
+        if event_emitter is None:
+            return
+        if entry.is_folder:
+            event_emitter.emit_folder_delete(entry, cascade=True)
+            return
+        file_id = None
+        if entry.file_entry_id is not None:
+            hydrated = self._require_file_service().get_file_reference_with_blobs(entry.id)
+            if hydrated is not None and hydrated.file_entry is not None:
+                file_id = hydrated.file_entry.file_id
+        event_emitter.emit_file_delete(entry, file_id=file_id)
 
     @staticmethod
     def _normalize_vault_path(path: str | None) -> str:
@@ -580,17 +648,24 @@ class VaultFileService:
                 target_name,
                 destination_parent_id,
             )
+            event_emitter = self._build_event_emitter()
+            if event_emitter is not None:
+                event_emitter.emit_folder_create(created_folder)
             for child in self._require_folder_service().get_children(source.id):
                 self._copy_reference(child.id, created_folder.id)
             return created_folder
 
         if source.file_entry_id is None:
             raise RuntimeError(f"File reference {source.id} has no file entry")
-        return self._require_file_service().create_file_reference(
+        created_ref = self._require_file_service().create_file_reference(
             name=target_name,
             parent_id=destination_parent_id,
             file_entry_id=source.file_entry_id,
         )
+        event_emitter = self._build_event_emitter()
+        if event_emitter is not None:
+            event_emitter.emit_file_add(created_ref)
+        return created_ref
 
     def _export_reference(
         self,

@@ -12,28 +12,40 @@ from app.config import (
 from app.core.vault_layout import metadata_path
 
 APP_DATA_DIR = get_app_data_dir()
-VAULTS_REGISTRY = APP_DATA_DIR / VAULTS_REGISTRY_FILE
 
 
-def load_registry() -> list[dict]:
+def _registry_path(app_data_dir: Path | None = None) -> Path:
+    root = Path(app_data_dir or APP_DATA_DIR)
+    return root / VAULTS_REGISTRY_FILE
+
+
+def load_registry(app_data_dir: Path | None = None) -> list[dict]:
     """Load and return all vault registry entries from disk."""
-    ensure_app_data_layout(APP_DATA_DIR)
-    if not VAULTS_REGISTRY.exists():
+    root = Path(app_data_dir or APP_DATA_DIR)
+    registry_path = _registry_path(root)
+    ensure_app_data_layout(root)
+    if not registry_path.exists():
         return []
-    with open(VAULTS_REGISTRY, "r", encoding="utf-8") as f:
+    with open(registry_path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
-def save_registry(entries: list[dict]) -> None:
+def save_registry(entries: list[dict], app_data_dir: Path | None = None) -> None:
     """Persist the given vault registry entries to disk."""
-    ensure_app_data_layout(APP_DATA_DIR)
-    with open(VAULTS_REGISTRY, "w", encoding="utf-8") as f:
+    root = Path(app_data_dir or APP_DATA_DIR)
+    ensure_app_data_layout(root)
+    with open(_registry_path(root), "w", encoding="utf-8") as f:
         json.dump(entries, f, indent=4)
 
 
-def upsert_registry(vault_id: str, vault_alias: str, vault_path: str) -> None:
+def upsert_registry(
+    vault_id: str,
+    vault_alias: str,
+    vault_path: str,
+    app_data_dir: Path | None = None,
+) -> None:
     """Insert or update a vault entry in the registry."""
-    entries = load_registry()
+    entries = load_registry(app_data_dir)
     now = datetime.now(timezone.utc).isoformat()
 
     for entry in entries:
@@ -41,7 +53,7 @@ def upsert_registry(vault_id: str, vault_alias: str, vault_path: str) -> None:
             entry["vault_alias"] = vault_alias
             entry["path"] = vault_path
             entry["last_opened"] = now
-            save_registry(entries)
+            save_registry(entries, app_data_dir)
             return
 
     entries.append(
@@ -52,7 +64,7 @@ def upsert_registry(vault_id: str, vault_alias: str, vault_path: str) -> None:
             "last_opened": now,
         }
     )
-    save_registry(entries)
+    save_registry(entries, app_data_dir)
 
 
 def write_vault_metadata(vault_dir: Path, vault_id: str, name: str) -> None:

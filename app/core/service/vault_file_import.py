@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from app.core.crypto.service.encryption_service import EncryptionService
     from app.core.database.service.file_service import FileService
     from app.core.database.service.folder_service import FolderService
+    from app.core.sync.event_emitter import EventEmitter
 
 
 def add_file(
@@ -25,6 +26,7 @@ def add_file(
     folder_service: "FolderService | None" = None,
     encryption_service: "EncryptionService",
     indexing_service: "IndexingService | None" = None,
+    event_emitter: "EventEmitter | None" = None,
     source: Path,
     dest_name: str | None = None,
     dest_parent_virtual_path: str | None = None,
@@ -43,6 +45,7 @@ def add_file(
     parent_id = _resolve_or_create_parent_folder(
         folder_service,
         dest_parent_virtual_path,
+        event_emitter=event_emitter,
     )
     destination_name = dest_name or source.name
     logger.info(f"Import started: source={source}, destination={destination_name}")
@@ -53,11 +56,13 @@ def add_file(
             f"Import deduplicated: destination={destination_name}, "
             f"existing_entry_id={existing_entry.id}"
         )
-        file_service.create_file_reference(
+        created_ref = file_service.create_file_reference(
             name=destination_name,
             parent_id=parent_id,
             file_entry_id=existing_entry.id,
         )
+        if event_emitter is not None:
+            event_emitter.emit_file_add(created_ref)
         return AddFileResult(
             file_name=destination_name,
             deduplicated=True,
@@ -103,11 +108,13 @@ def add_file(
             f"Import encrypted and stored: destination={destination_name}, "
             f"entry_id={file_entry.id}, file_id={file_id}, blobs={len(blob_ids)}"
         )
-        file_service.create_file_reference(
+        created_ref = file_service.create_file_reference(
             name=destination_name,
             parent_id=parent_id,
             file_entry_id=file_entry.id,
         )
+        if event_emitter is not None:
+            event_emitter.emit_file_add(created_ref)
 
         indexed = False
         if indexing_service is not None:
@@ -173,6 +180,7 @@ def _normalize_vault_dir_path(path: str | None) -> str:
 def _resolve_or_create_parent_folder(
     folder_service: "FolderService | None",
     dest_parent_virtual_path: str | None,
+    event_emitter: "EventEmitter | None" = None,
 ) -> int | None:
     """Resolve or create the parent folder for a given virtual path. 
     Parents will be created as needed. 
@@ -192,6 +200,8 @@ def _resolve_or_create_parent_folder(
 
         if existing is None:
             existing = folder_service.create_folder(name=segment, parent_id=parent_id)
+            if event_emitter is not None:
+                event_emitter.emit_folder_create(existing)
         elif not existing.is_folder:
             bad_path = "/" + "/".join(traversed)
             raise NotADirectoryError(

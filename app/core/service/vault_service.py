@@ -48,6 +48,19 @@ class VaultService:
             vault_path, fallback_alias, fallback_vault_id
         )
 
+    def import_vault(
+        self,
+        vault_path: Path,
+        fallback_alias: str | None = None,
+        fallback_vault_id: str | None = None,
+    ) -> dict[str, str]:
+        """Register an existing vault in the local known-vault registry."""
+        return self.runtime.import_vault(
+            vault_path,
+            fallback_alias,
+            fallback_vault_id,
+        )
+
     def create_new_vault(
         self,
         vault_path: Path,

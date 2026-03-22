@@ -62,4 +62,5 @@ test_data/
 
 .ruff_cache/
 .uv_cache/
+.test_vaults/
 .vault/

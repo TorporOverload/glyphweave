@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from app.core.crypto.service.encryption_service import EncryptionService
     from app.core.database.service.file_service import FileService
     from app.core.database.service.folder_service import FolderService
+    from app.core.sync.event_emitter import EventEmitter
 
 
 def get_cached_fallback_result(
@@ -141,6 +142,7 @@ def finalize_fallback_open(
     folder_service: "FolderService",
     encryption_service: "EncryptionService",
     file_ref_id: int,
+    event_emitter: "EventEmitter | None" = None,
 ) -> str:
     """Save any changes from a fallback-opened temp file back to the vault and clean
     up."""
@@ -169,6 +171,7 @@ def finalize_fallback_open(
                 file_service=file_service,
                 folder_service=folder_service,
                 encryption_service=encryption_service,
+                event_emitter=event_emitter,
                 file_ref=file_ref,
                 plaintext_path=temp_path,
             )
@@ -192,6 +195,7 @@ def re_encrypt_file(
     encryption_service: "EncryptionService",
     file_ref: Any,
     plaintext_path: Path,
+    event_emitter: "EventEmitter | None" = None,
 ) -> None:
     """Re-encrypt a modified plaintext file and update the vault database entry."""
     vault_path = context.require_vault_path()
@@ -204,6 +208,7 @@ def re_encrypt_file(
     new_entry_created = False
 
     existing_entry = file_service.find_by_content_hash(content_hash)
+    old_entry = file_ref.file_entry
     if existing_entry is not None:
         old_entry_id = file_service.update_file_reference_entry(
             file_ref.id,
@@ -211,6 +216,11 @@ def re_encrypt_file(
         )
         if old_entry_id is not None and old_entry_id != existing_entry.id:
             _cleanup_orphaned_entry(folder_service, old_entry_id)
+        if event_emitter is not None:
+            updated_ref = file_service.get_file_reference_with_blobs(file_ref.id)
+            new_entry = file_service.get_file_entry_by_file_id(existing_entry.file_id)
+            if updated_ref is not None and new_entry is not None:
+                event_emitter.emit_file_update(updated_ref, old_entry, new_entry)
         return
 
     new_file_id = str(uuid.uuid4())
@@ -244,6 +254,15 @@ def re_encrypt_file(
         )
         if old_entry_id is not None:
             _cleanup_orphaned_entry(folder_service, old_entry_id)
+        if event_emitter is not None:
+            updated_ref = file_service.get_file_reference_with_blobs(file_ref.id)
+            hydrated_new_entry = file_service.get_file_entry_by_file_id(new_file_id)
+            if updated_ref is not None and hydrated_new_entry is not None:
+                event_emitter.emit_file_update(
+                    updated_ref,
+                    old_entry,
+                    hydrated_new_entry,
+                )
     except Exception:
         if blob_ids and not new_entry_created:
             _cleanup_partial_blobs(vault_path, blob_ids)

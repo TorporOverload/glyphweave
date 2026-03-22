@@ -16,6 +16,9 @@ from app.core.database.model import search_index  # noqa: F401, E402
 from app.core.database.model.file_blob_reference import FileBlobReference  # noqa: F401, E402
 from app.core.database.model.file_entry import FileEntry  # noqa: F401, E402
 from app.core.database.model.file_reference import FileReference  # noqa: F401, E402
+from app.core.database.model.processed_event import ProcessedEvent  # noqa: F401, E402
+from app.core.database.model.sync_node_state import SyncNodeState  # noqa: F401, E402
+from app.core.database.model.sync_tombstone import SyncTombstone  # noqa: F401, E402
 from app.core.database.model.WAL_entry import WalEntry  # noqa: F401, E402
 
 
@@ -30,7 +33,8 @@ class DbBase:
     ):
         self.db_key = db_key
         self.vaults_data_dir = Path(vaults_data_dir or get_vaults_data_dir())
-        self.engine = self.create_db_engine(vault_id, self.vaults_data_dir)
+        self.db_path = self.resolve_db_path(vault_id, self.vaults_data_dir)
+        self.engine = self.create_db_engine(self.db_path)
 
         # Set up event listener to apply PRAGMA key on every connection
         @event.listens_for(self.engine, "connect")
@@ -61,14 +65,19 @@ class DbBase:
             raise
 
     @staticmethod
-    def create_db_engine(vault_id: str, vaults_data_dir: Path):
-        """Create and return a SQLCipher engine for the given vault."""
+    def resolve_db_path(vault_id: str, vaults_data_dir: Path) -> Path:
+        """Return the filesystem path for the vault database."""
         db_dir = vaults_data_dir / vault_id
         db_dir.mkdir(parents=True, exist_ok=True)
-        db_path = str(db_dir / DB_FILENAME)
+        return db_dir / DB_FILENAME
+
+    @staticmethod
+    def create_db_engine(db_path: Path):
+        """Create and return a SQLCipher engine for the given vault DB path."""
+        db_path_str = str(db_path)
 
         engine = create_engine(
-            f"sqlite:///{db_path}",
+            f"sqlite:///{db_path_str}",
             module=sqlcipher3,
             future=True,
             connect_args={"check_same_thread": False},

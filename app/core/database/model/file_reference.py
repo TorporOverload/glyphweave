@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, List, Optional
 
@@ -29,6 +30,13 @@ class FileReference(Base):
     __tablename__ = "file_reference"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    node_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        unique=True,
+        index=True,
+        default=lambda: str(uuid.uuid4()),
+    )
     parent_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("file_reference.id"), nullable=True, index=True
     )

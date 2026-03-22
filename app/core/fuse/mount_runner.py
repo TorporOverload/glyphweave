@@ -30,6 +30,7 @@ from app.core.database.base import DbBase
 from app.core.database.service.file_service import FileService
 from app.core.runtime_layout import runtime_cache_dir
 from app.core.fuse.single_fs import SingleFileFS
+from app.core.service.db_dump_service import install_db_dump_hook
 from app.core.vault_layout import vault_key_path
 
 
@@ -105,6 +106,13 @@ def main() -> int:
     # Now safe to proceed with DB operations; master key is locked in memory
     db = DbBase(args.vault_id, db_key_hex, vaults_data_dir=vaults_data_dir)
     session_factory = db.SessionLocal
+    install_db_dump_hook(
+        session_factory=session_factory,
+        vault_path=vault_path,
+        db_path=db.db_path,
+        db_key_hex=db_key_hex,
+        app_data_dir=vaults_data_dir.parent,
+    )
     file_service = FileService(session_factory)
 
     file_ref = file_service.get_file_reference_with_blobs(file_ref_id)
