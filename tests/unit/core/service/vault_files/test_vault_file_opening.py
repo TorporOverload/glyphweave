@@ -2,9 +2,9 @@ from types import SimpleNamespace
 
 import pytest
 
-import app.core.service.vault_file_opening as opening_module
-from app.core.service.models import OpenFileResult, PendingFallbackOpen, VaultContext
-from app.core.service.vault_file_opening import open_file_by_ref
+import app.services.vault_files.vault_file_opening as opening_module
+from app.services.models import OpenFileResult, PendingFallbackOpen, VaultContext
+from app.services.vault_files.vault_file_opening import open_file_by_ref
 
 
 class _FakeFileService:

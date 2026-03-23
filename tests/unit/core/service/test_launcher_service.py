@@ -1,7 +1,7 @@
 import pytest
 
-import app.core.service.launcher_service as launcher_module
-from app.core.service.launcher_service import open_with_default_app
+import app.infrastructure.platform.launcher as launcher_module
+from app.infrastructure.platform.launcher import open_with_default_app
 
 
 def test_open_with_default_app_uses_startfile_on_windows(tmp_path, monkeypatch) -> None:

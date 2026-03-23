@@ -3,9 +3,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.core.runtime_layout import runtime_cache_dir
-from app.core.service.models import AddFileResult, VaultContext
-from app.core.service.vault_file_service import VaultFileService
+from app.common.paths.runtime_layout import runtime_cache_dir
+from app.services.models import AddFileResult, VaultContext
+from app.services.vault_files.vault_file_service import VaultFileService
 
 
 class _MasterKey:
@@ -16,7 +16,9 @@ class _MasterKey:
         return memoryview(self._value)
 
 
-def test_build_indexing_service_returns_none_when_context_incomplete(tmp_path: Path) -> None:
+def test_build_indexing_service_returns_none_when_context_incomplete(
+    tmp_path: Path,
+) -> None:
     service = VaultFileService(VaultContext(app_data_dir=tmp_path))
 
     assert service._build_indexing_service() is None
@@ -40,7 +42,9 @@ def test_build_indexing_service_uses_runtime_cache_dir(tmp_path: Path) -> None:
     assert indexing._cache_dir == runtime_cache_dir(context.local_data_path)
 
 
-def test_add_file_passes_indexing_service_to_import(monkeypatch, tmp_path: Path) -> None:
+def test_add_file_passes_indexing_service_to_import(
+    monkeypatch, tmp_path: Path
+) -> None:
     context = VaultContext(
         app_data_dir=tmp_path,
         vault_id="vault-1",
@@ -58,7 +62,7 @@ def test_add_file_passes_indexing_service_to_import(monkeypatch, tmp_path: Path)
     captured = {}
 
     monkeypatch.setattr(
-        "app.core.service.vault_file_service.add_file_to_vault",
+        "app.services.vault_files.commands.add_file_to_vault",
         lambda *args, **kwargs: captured.update(kwargs)
         or AddFileResult(
             file_name="report.txt",
@@ -100,11 +104,11 @@ def test_reindex_pending_retries_supported_pending_and_failed_entries(
     calls: list[tuple[int, str]] = []
 
     monkeypatch.setattr(
-        "app.core.service.vault_file_service.session_scope",
+        "app.services.vault_files.queries.session_scope",
         lambda *args, **kwargs: __import__("contextlib").nullcontext(session),
     )
     monkeypatch.setattr(
-        "app.core.service.vault_file_service.get_retriable_extractions",
+        "app.services.vault_files.queries.get_retriable_extractions",
         lambda current_session, limit: entries,
     )
     monkeypatch.setattr(
@@ -127,11 +131,13 @@ def test_reindex_pending_delegates_supported_name_selection(tmp_path: Path) -> N
     entry = SimpleNamespace(
         references=[
             SimpleNamespace(name="photo.png"),
-            SimpleNamespace(name="ދިވެހި.txt"),
+            SimpleNamespace(name="Þ‹Þ¨ÞˆÞ¬Þ€Þ¨.txt"),
         ]
     )
 
-    assert VaultFileService._select_supported_reference_name(entry) == "ދިވެހި.txt"
+    assert (
+        VaultFileService._select_supported_reference_name(entry) == "Þ‹Þ¨ÞˆÞ¬Þ€Þ¨.txt"
+    )
 
 
 def test_get_file_reference_metadata_returns_parsed_metadata(tmp_path: Path) -> None:
@@ -142,7 +148,9 @@ def test_get_file_reference_metadata_returns_parsed_metadata(tmp_path: Path) -> 
         get_file_reference_with_blobs=lambda ref_id: SimpleNamespace(
             id=ref_id,
             is_folder=False,
-            file_entry=SimpleNamespace(metadata_json='{"mime_type":"text/plain","size_bytes":5}'),
+            file_entry=SimpleNamespace(
+                metadata_json='{"mime_type":"text/plain","size_bytes":5}'
+            ),
         )
     )
 
@@ -151,7 +159,9 @@ def test_get_file_reference_metadata_returns_parsed_metadata(tmp_path: Path) -> 
     assert metadata == {"mime_type": "text/plain", "size_bytes": 5}
 
 
-def test_get_file_reference_metadata_returns_empty_when_missing_metadata(tmp_path: Path) -> None:
+def test_get_file_reference_metadata_returns_empty_when_missing_metadata(
+    tmp_path: Path,
+) -> None:
     context = VaultContext(app_data_dir=tmp_path, file_service=object())
     service = VaultFileService(context)
 
@@ -182,7 +192,9 @@ def test_get_file_reference_metadata_raises_for_folder(tmp_path: Path) -> None:
         service.get_file_reference_metadata(9)
 
 
-def test_get_file_reference_metadata_raises_for_missing_reference(tmp_path: Path) -> None:
+def test_get_file_reference_metadata_raises_for_missing_reference(
+    tmp_path: Path,
+) -> None:
     context = VaultContext(app_data_dir=tmp_path, file_service=object())
     service = VaultFileService(context)
 

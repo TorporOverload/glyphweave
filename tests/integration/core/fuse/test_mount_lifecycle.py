@@ -4,9 +4,9 @@ from typing import Any, cast
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.core.database.base import Base  # noqa: F401
-import app.core.fuse.fuse_orchestrator as mounts_module
-from app.core.fuse.fuse_orchestrator import FuseOrchestrator
+from app.infrastructure.persistence.db.base import Base  # noqa: F401
+import app.infrastructure.fuse.fuse_orchestrator as mounts_module
+from app.infrastructure.fuse.fuse_orchestrator import FuseOrchestrator
 
 
 class _KeyService:

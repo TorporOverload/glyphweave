@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from app.core.service.vault_file_service import VaultFileService
+from app.services.vault_files.vault_file_service import VaultFileService
 
 
 class TestFileLifecycle:
@@ -20,7 +20,7 @@ class TestFileLifecycle:
     ) -> None:
         """Full lifecycle: import -> open (fallback) -> edit -> save -> verify."""
         # Prevent the launcher from actually opening a desktop app
-        import app.core.service.vault_file_fallback as fb_mod
+        import app.services.vault_files.vault_file_fallback as fb_mod
 
         monkeypatch.setattr(fb_mod, "open_with_default_app", lambda _: None)
 
@@ -58,7 +58,7 @@ class TestFileLifecycle:
         modified_content = b"Modified content after edit!"
         open_result.file_path.write_bytes(modified_content)
 
-        # --- Step 5: Unmount (finalize) — should detect changes and re-encrypt ---
+        # --- Step 5: Unmount (finalize) â€” should detect changes and re-encrypt ---
         save_msg = vault_file_service.unmount_unlocked(ref.id)
         assert "Changes saved" in save_msg
 
@@ -87,7 +87,7 @@ class TestFileLifecycle:
         monkeypatch,
     ) -> None:
         """Verify that unmounting an unmodified file skips re-encryption."""
-        import app.core.service.vault_file_fallback as fb_mod
+        import app.services.vault_files.vault_file_fallback as fb_mod
 
         monkeypatch.setattr(fb_mod, "open_with_default_app", lambda _: None)
 
@@ -135,7 +135,7 @@ class TestFileLifecycle:
         monkeypatch,
     ) -> None:
         """cleanup() should finalize all open fallback files."""
-        import app.core.service.vault_file_fallback as fb_mod
+        import app.services.vault_files.vault_file_fallback as fb_mod
 
         monkeypatch.setattr(fb_mod, "open_with_default_app", lambda _: None)
 

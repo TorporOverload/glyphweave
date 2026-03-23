@@ -2,9 +2,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
-from app.core.service.models import SearchPage, SearchResult, VaultContext
-from app.core.service.vault_service import VaultService
-from app.core.service.vault_file_service import VaultFileService
+from app.services.models import SearchPage, SearchResult, VaultContext
+from app.services.vault_service import VaultService
+from app.services.vault_files.vault_file_service import VaultFileService
 
 
 @contextmanager
@@ -61,7 +61,9 @@ def test_search_result_dataclass() -> None:
     assert result.rank == -1.5
 
 
-def test_vault_file_service_search_returns_empty_for_blank_query(tmp_path: Path) -> None:
+def test_vault_file_service_search_returns_empty_for_blank_query(
+    tmp_path: Path,
+) -> None:
     service = VaultFileService(VaultContext(app_data_dir=tmp_path))
 
     assert service.search("   ") == []
@@ -83,15 +85,15 @@ def test_vault_file_service_search_maps_fts_results(
     session = _FakeSession(refs)
 
     monkeypatch.setattr(
-        "app.core.service.vault_file_service.session_scope",
+        "app.services.vault_files.queries.session_scope",
         lambda *args, **kwargs: _fake_session_scope(session),
     )
     monkeypatch.setattr(
-        "app.core.service.vault_file_service.search_file_references",
+        "app.services.vault_files.queries.search_file_references",
         lambda current_session, query, limit: [],
     )
     monkeypatch.setattr(
-        "app.core.service.vault_file_service.search_content",
+        "app.services.vault_files.queries.search_content",
         lambda current_session, query, limit: [("7", "...<b>hello</b>...", -1.0)],
     )
 
@@ -116,8 +118,8 @@ def test_vault_file_service_search_supports_dhivehi_query(
     refs = [
         SimpleNamespace(
             id=22,
-            name="ދިވެހި.txt",
-            virtual_path="/docs/ދިވެހި.txt",
+            name="Þ‹Þ¨ÞˆÞ¬Þ€Þ¨.txt",
+            virtual_path="/docs/Þ‹Þ¨ÞˆÞ¬Þ€Þ¨.txt",
             is_folder=False,
         )
     ]
@@ -125,29 +127,29 @@ def test_vault_file_service_search_supports_dhivehi_query(
     seen = {}
 
     monkeypatch.setattr(
-        "app.core.service.vault_file_service.session_scope",
+        "app.services.vault_files.queries.session_scope",
         lambda *args, **kwargs: _fake_session_scope(session),
     )
     monkeypatch.setattr(
-        "app.core.service.vault_file_service.search_file_references",
+        "app.services.vault_files.queries.search_file_references",
         lambda current_session, query, limit: [],
     )
 
     def _search_content(current_session, query, limit):
         seen["query"] = query
-        return [("9", "<b>ދިވެހި</b> ބަސް", -2.0)]
+        return [("9", "<b>Þ‹Þ¨ÞˆÞ¬Þ€Þ¨</b> Þ„Þ¦ÞÞ°", -2.0)]
 
     monkeypatch.setattr(
-        "app.core.service.vault_file_service.search_content",
+        "app.services.vault_files.queries.search_content",
         _search_content,
     )
 
-    results = service.search("ދިވެހި")
+    results = service.search("Þ‹Þ¨ÞˆÞ¬Þ€Þ¨")
 
-    assert seen["query"] == "ދިވެހި"
+    assert seen["query"] == "Þ‹Þ¨ÞˆÞ¬Þ€Þ¨"
     assert len(results) == 1
-    assert results[0].file_name == "ދިވެހި.txt"
-    assert results[0].virtual_path == "/docs/ދިވެހި.txt"
+    assert results[0].file_name == "Þ‹Þ¨ÞˆÞ¬Þ€Þ¨.txt"
+    assert results[0].virtual_path == "/docs/Þ‹Þ¨ÞˆÞ¬Þ€Þ¨.txt"
 
 
 def test_vault_file_service_search_returns_filename_matches_before_content(
@@ -172,17 +174,17 @@ def test_vault_file_service_search_returns_filename_matches_before_content(
     session = _FakeSession(refs)
 
     monkeypatch.setattr(
-        "app.core.service.vault_file_service.session_scope",
+        "app.services.vault_files.queries.session_scope",
         lambda *args, **kwargs: _fake_session_scope(session),
     )
     monkeypatch.setattr(
-        "app.core.service.vault_file_service.search_file_references",
+        "app.services.vault_files.queries.search_file_references",
         lambda current_session, query, limit: [
             (11, "budget.txt", "/docs/budget.txt", -999000.0)
         ],
     )
     monkeypatch.setattr(
-        "app.core.service.vault_file_service.search_content",
+        "app.services.vault_files.queries.search_content",
         lambda current_session, query, limit: [("7", "...<b>budget</b> line...", -1.0)],
     )
 
@@ -209,17 +211,17 @@ def test_vault_file_service_search_deduplicates_filename_and_content_hits(
     session = _FakeSession(refs)
 
     monkeypatch.setattr(
-        "app.core.service.vault_file_service.session_scope",
+        "app.services.vault_files.queries.session_scope",
         lambda *args, **kwargs: _fake_session_scope(session),
     )
     monkeypatch.setattr(
-        "app.core.service.vault_file_service.search_file_references",
+        "app.services.vault_files.queries.search_file_references",
         lambda current_session, query, limit: [
             (11, "report.txt", "/docs/report.txt", -999000.0)
         ],
     )
     monkeypatch.setattr(
-        "app.core.service.vault_file_service.search_content",
+        "app.services.vault_files.queries.search_content",
         lambda current_session, query, limit: [("7", "...<b>report</b> body...", -1.0)],
     )
 
@@ -230,7 +232,9 @@ def test_vault_file_service_search_deduplicates_filename_and_content_hits(
     assert results[0].snippet == "Filename: <b>report</b>.txt"
 
 
-def test_vault_service_search_delegates_to_file_service(tmp_path: Path, monkeypatch) -> None:
+def test_vault_service_search_delegates_to_file_service(
+    tmp_path: Path, monkeypatch
+) -> None:
     service = VaultService(app_data_dir=tmp_path)
     expected = [
         SearchResult(
@@ -275,11 +279,11 @@ def test_vault_file_service_search_page_reports_has_more(
     session = _FakeSession(refs)
 
     monkeypatch.setattr(
-        "app.core.service.vault_file_service.session_scope",
+        "app.services.vault_files.queries.session_scope",
         lambda *args, **kwargs: _fake_session_scope(session),
     )
     monkeypatch.setattr(
-        "app.core.service.vault_file_service.search_file_references",
+        "app.services.vault_files.queries.search_file_references",
         lambda current_session, query, limit: [
             (11, "alpha.txt", "/docs/alpha.txt", -10.0),
             (12, "beta.txt", "/docs/beta.txt", -9.0),
@@ -287,7 +291,7 @@ def test_vault_file_service_search_page_reports_has_more(
         ],
     )
     monkeypatch.setattr(
-        "app.core.service.vault_file_service.search_content",
+        "app.services.vault_files.queries.search_content",
         lambda current_session, query, limit: [],
     )
 

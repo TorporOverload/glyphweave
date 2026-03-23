@@ -2,10 +2,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-import app.core.service.vault_file_fallback as fallback_module
-from app.core.crypto.service.utils import compute_hash
-from app.core.service.models import PendingFallbackOpen, VaultContext
-from app.core.service.vault_file_fallback import (
+import app.services.vault_files.vault_file_fallback as fallback_module
+from app.infrastructure.crypto.service.utils import compute_hash
+from app.services.models import PendingFallbackOpen, VaultContext
+from app.services.vault_files.vault_file_fallback import (
     finalize_fallback_open,
     get_cached_fallback_result,
     open_file_fallback,

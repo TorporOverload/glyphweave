@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from app.core.service.file_metadata_service import FileMetadataService
+from app.services.content.metadata_service import FileMetadataService
 
 
 def test_extract_returns_basic_metadata_for_supported_file(tmp_path: Path) -> None:

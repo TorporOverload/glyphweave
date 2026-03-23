@@ -4,7 +4,7 @@ from pathlib import Path
 
 from sqlalchemy import text
 
-from app.core.database.base import DB_FILENAME, Base, DbBase
+from app.infrastructure.persistence.db.base import DB_FILENAME, Base, DbBase
 
 
 def test_database_encryption(tmp_path):
@@ -95,6 +95,9 @@ def test_database_encryption(tmp_path):
         "file_blob_reference",
         "wal_entries",
         "search_index",
+        "processed_event",
+        "sync_node_state",
+        "sync_tombstone",
     ]
 
     with db.engine.connect() as conn:

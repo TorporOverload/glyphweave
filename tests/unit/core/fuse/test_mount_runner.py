@@ -3,7 +3,7 @@ import os
 
 import msvcrt
 
-from app.core.fuse.mount_runner import _read_key_material
+from app.infrastructure.fuse.mount_runner import _read_key_material
 
 
 def test_read_key_material_returns_mutable_buffer():

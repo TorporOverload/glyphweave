@@ -11,17 +11,17 @@ from sqlalchemy.orm import sessionmaker
 
 os.environ.setdefault("GLYPHWEAVE_DEBUG", "0")
 
-from app.core.crypto.service.encryption_service import EncryptionService
-from app.core.crypto.service.key_service import KeyService
-from app.core.database.base import Base
-from app.core.database.model.file_reference import FileReference
-from app.core.database.service.file_service import FileService
-from app.core.database.service.folder_service import FolderService
-from app.core.database.service.gc_service import GarbageCollector
-from app.core.database.service.wal_service import WalService
-from app.core.fuse.chunk_store import ChunkStore
-from app.core.fuse.temp_store import TempStore
-from app.core.vault_layout import create_vault_layout
+from app.infrastructure.crypto.service.encryption_service import EncryptionService
+from app.infrastructure.crypto.service.key_service import KeyService
+from app.infrastructure.persistence.db.base import Base
+from app.infrastructure.persistence.db.model.file_reference import FileReference
+from app.infrastructure.persistence.db.service.file_service import FileService
+from app.infrastructure.persistence.db.service.folder_service import FolderService
+from app.infrastructure.persistence.db.service.gc_service import GarbageCollector
+from app.infrastructure.persistence.db.service.wal_service import WalService
+from app.infrastructure.fuse.chunk_store import ChunkStore
+from app.infrastructure.fuse.temp_store import TempStore
+from app.common.paths.vault_layout import create_vault_layout
 from tests.support.fuse_builders import build_single_file_fs, create_encrypted_file_in_vault
 
 
@@ -63,8 +63,8 @@ def temp_runtime_cache_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture(scope="function")
 def db_engine(temp_vault_path: Path, test_master_key: bytes, test_vault_id: bytes):
-    from app.core.crypto.primitives.key_derivation import derive_subkey
-    from app.core.crypto.types import KeyPurpose
+    from app.infrastructure.crypto.primitives.key_derivation import derive_subkey
+    from app.infrastructure.crypto.types import KeyPurpose
 
     db_path = temp_vault_path / "test.db"
     db_key_bytes = derive_subkey(
@@ -111,8 +111,8 @@ def db_session(session_factory) -> Generator:
 
 @pytest.fixture(scope="function")
 def key_service(test_master_key: bytes, test_vault_id_str: str) -> KeyService:
-    from app.core.crypto.primitives.secure_memory import SecureMemory
-    from app.core.crypto.types import KDFParams, VaultKeyFile, WrappedKey
+    from app.infrastructure.crypto.primitives.secure_memory import SecureMemory
+    from app.infrastructure.crypto.types import KDFParams, VaultKeyFile, WrappedKey
 
     service = KeyService()
     service.master_key = SecureMemory(test_master_key)

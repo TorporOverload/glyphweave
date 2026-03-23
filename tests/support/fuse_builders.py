@@ -3,14 +3,17 @@ import secrets
 from pathlib import Path
 from typing import Any
 
-from app.core.database.model.file_reference import FileReference
-from app.core.fuse.single_fs import SingleFileFS
-from app.core.vault_layout import resolve_blob_path
+from app.common.paths.vault_layout import resolve_blob_path
+from app.infrastructure.fuse.single_fs import SingleFileFS
+from app.infrastructure.persistence.db.model.file_reference import FileReference
 
 
 def ordered_blob_ids(file_entry: Any) -> list[str]:
     """Return blob ids in their persisted chunk order."""
-    return [blob.blob_id for blob in sorted(file_entry.blobs, key=lambda blob: blob.blob_index)]
+    return [
+        blob.blob_id
+        for blob in sorted(file_entry.blobs, key=lambda blob: blob.blob_index)
+    ]
 
 
 def create_encrypted_file_in_vault(

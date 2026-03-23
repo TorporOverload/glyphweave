@@ -10,12 +10,12 @@ import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch, PropertyMock
 
-from app.core.database.model.WAL_entry import WalEntry
-from app.core.database.model.file_entry import FileEntry
-from app.core.database.model.file_reference import FileReference
-from app.core.database.model.file_blob_reference import FileBlobReference
-from app.core.fuse.fuse_orchestrator import FuseOrchestrator, MountInfo
-from app.core.vault_layout import resolve_blob_path
+from app.infrastructure.persistence.db.model.WAL_entry import WalEntry
+from app.infrastructure.persistence.db.model.file_entry import FileEntry
+from app.infrastructure.persistence.db.model.file_reference import FileReference
+from app.infrastructure.persistence.db.model.file_blob_reference import FileBlobReference
+from app.infrastructure.fuse.fuse_orchestrator import FuseOrchestrator, MountInfo
+from app.common.paths.vault_layout import resolve_blob_path
 
 
 class TestMountsInit:
@@ -509,7 +509,7 @@ class TestMountFileNaming:
     def test_mount_file_name_uses_mime_extension_when_missing(self):
         mount_dir = Path("C:/tmp/mount")
         with patch(
-            "app.core.fuse.fuse_orchestrator.platform.system", return_value="Windows"
+            "app.infrastructure.fuse.fuse_orchestrator.platform.system", return_value="Windows"
         ):
             name = FuseOrchestrator._mount_file_name(
                 "report",
@@ -523,7 +523,7 @@ class TestMountFileNaming:
     def test_mount_file_name_falls_back_to_bin_when_mime_unknown(self):
         mount_dir = Path("C:/tmp/mount")
         with patch(
-            "app.core.fuse.fuse_orchestrator.platform.system", return_value="Windows"
+            "app.infrastructure.fuse.fuse_orchestrator.platform.system", return_value="Windows"
         ):
             name = FuseOrchestrator._mount_file_name(
                 "report",
@@ -548,7 +548,7 @@ class TestPlatformSupport:
         cache_dir = temp_runtime_cache_dir
 
         with patch(
-            "app.core.fuse.fuse_orchestrator.platform.system", return_value="Linux"
+            "app.infrastructure.fuse.fuse_orchestrator.platform.system", return_value="Linux"
         ):
             with pytest.raises(OSError, match="Windows"):
                 FuseOrchestrator(

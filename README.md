@@ -20,4 +20,8 @@ $env:GLYPHWEAVE_DEBUG="1"; uv run glyphweave
 uv run pytest
 ```
 
+## Runtime Notes
+
+- On first startup, GlyphWeave creates `device.json` in the app data directory and assigns a persistent UUIDv4 `device_id` if one is missing.
+- SQLCipher DB dumps are created with SQLite's online backup API and stored under `vault/db_dumps/`.
 

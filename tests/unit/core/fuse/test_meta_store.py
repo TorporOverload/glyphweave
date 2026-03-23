@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.core.fuse.meta_store import MetaStore
+from app.infrastructure.fuse.meta_store import MetaStore
 
 
 class TestMetaStoreInit:
@@ -173,7 +173,7 @@ class TestUpdateMetadata:
 
     def test_update_nonexistent_is_noop(self):
         store = MetaStore()
-        from app.core.fuse.types import FileMeta
+        from app.infrastructure.fuse.types import FileMeta
 
         meta = FileMeta(file_id="fake", original_name="f.txt", plaintext_size=0)
         store.update_metadata("fake", meta)  # should not raise

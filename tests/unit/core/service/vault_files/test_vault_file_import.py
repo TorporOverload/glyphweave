@@ -4,10 +4,10 @@ from typing import Any
 
 import pytest
 
-from app.core.database.model.extraction_status import ExtractionStatus
-from app.core.service.models import VaultContext
-from app.core.service.vault_file_import import add_file
-from app.core.vault_layout import resolve_blob_path, writable_blobs_dir
+from app.infrastructure.persistence.db.model.extraction_status import ExtractionStatus
+from app.services.models import VaultContext
+from app.services.vault_files.vault_file_import import add_file
+from app.common.paths.vault_layout import resolve_blob_path, writable_blobs_dir
 
 
 class _MasterKey:

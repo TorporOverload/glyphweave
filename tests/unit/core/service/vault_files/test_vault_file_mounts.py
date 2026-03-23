@@ -1,9 +1,9 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-import app.core.service.vault_file_mounts as mounts_module
-from app.core.service.models import VaultContext
-from app.core.service.vault_file_mounts import (
+import app.services.vault_files.vault_file_mounts as mounts_module
+from app.services.models import VaultContext
+from app.services.vault_files.vault_file_mounts import (
     get_mounted_open_result,
     list_mounted_unlocked_files,
     mount_file,

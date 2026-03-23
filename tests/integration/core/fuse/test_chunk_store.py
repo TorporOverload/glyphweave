@@ -8,8 +8,8 @@ import secrets
 
 import pytest
 
-from app.core.crypto.constants import FUSE_CHUNK_SIZE
-from app.core.vault_layout import resolve_blob_path
+from app.infrastructure.crypto.constants import FUSE_CHUNK_SIZE
+from app.common.paths.vault_layout import resolve_blob_path
 from tests.support.fuse_builders import ordered_blob_ids
 
 
