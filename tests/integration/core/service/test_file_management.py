@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from app.core.service.vault_file_service import VaultFileService
+from app.services.vault_files.vault_file_service import VaultFileService
 
 TEST_CORPUS_DIR = (
     Path(__file__).resolve().parents[4] / "test_data" / "test_corpus"
@@ -161,3 +161,4 @@ def test_delete_entry_keeps_shared_content_when_other_reference_exists(
     assert [entry.name for entry in remaining] == ["copy.txt"]
     metadata = vault_file_service.get_file_reference_metadata(remaining[0].id)
     assert metadata["file_name"] == "aerast_chatdid-integration_main_s.txt"
+

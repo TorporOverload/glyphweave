@@ -1,8 +1,8 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.core.database.base import Base
-from app.core.database.service.folder_service import FolderService
+from app.infrastructure.persistence.db.base import Base
+from app.infrastructure.persistence.db.service.folder_service import FolderService
 
 
 def test_create_folder_builds_nested_virtual_path(tmp_path) -> None:

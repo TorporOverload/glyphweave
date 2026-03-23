@@ -2,10 +2,10 @@ import json
 
 import pytest
 
-from app.core.sync.event_store import EventIntegrityError, EventStore
-from app.core.sync.event_types import EventType
-from app.core.sync.hashing import canonical_event_body, canonical_json_bytes, hash_event
-from app.core.sync.models import HybridLogicalClock, VaultEvent
+from app.infrastructure.persistence.event_store import EventIntegrityError, EventStore
+from app.core.domain.sync.event_types import EventType
+from app.core.domain.sync.hashing import canonical_event_body, canonical_json_bytes, hash_event
+from app.core.domain.sync.models import HybridLogicalClock, VaultEvent
 
 
 def _event(event_id: str = "evt-1") -> VaultEvent:
@@ -96,3 +96,4 @@ def test_load_event_raises_when_object_is_tampered(tmp_path) -> None:
 
     with pytest.raises(EventIntegrityError):
         store.load_event(stored.event_hash or "")
+

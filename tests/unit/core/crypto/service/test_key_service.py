@@ -1,8 +1,8 @@
 import pytest
 
-from app.core.crypto.service import KeyService
-from app.core.crypto.types import KDFParams, KeyPurpose, VaultKeyFile, WrappedKey
-from app.exceptions.crypto import InvalidPasswordError
+from app.infrastructure.crypto.service import KeyService
+from app.infrastructure.crypto.types import KDFParams, KeyPurpose, VaultKeyFile, WrappedKey
+from app.common.exceptions.crypto import InvalidPasswordError
 
 
 class TestKeyService:

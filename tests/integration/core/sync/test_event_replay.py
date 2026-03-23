@@ -3,10 +3,10 @@ import json
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
-from app.core.database.base import Base
-from app.core.database.model.file_reference import FileReference
-from app.core.sync.event_emitter import EventEmitter
-from app.core.sync.replay import replay_vault_events
+from app.infrastructure.persistence.db.base import Base
+from app.infrastructure.persistence.db.model.file_reference import FileReference
+from app.services.sync.event_emitter import EventEmitter
+from app.services.sync.replay import replay_vault_events
 
 
 class _Blob:

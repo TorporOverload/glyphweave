@@ -4,7 +4,7 @@ from pathlib import Path
 
 from sqlalchemy import text
 
-from app.core.database.base import DB_FILENAME, Base, DbBase
+from app.infrastructure.persistence.db.base import DB_FILENAME, Base, DbBase
 
 
 def test_database_encryption(tmp_path):

@@ -3,11 +3,11 @@ import json
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
-from app.core.database.base import Base
-from app.core.database.model.processed_event import ProcessedEvent
-from app.core.service.db_dump_service import DBDumpService
-from app.core.sync.event_types import EventType
-from app.core.sync.replay import replay_vault_events
+from app.infrastructure.persistence.db.base import Base
+from app.infrastructure.persistence.db.model.processed_event import ProcessedEvent
+from app.infrastructure.persistence.db_dump_service import DBDumpService
+from app.core.domain.sync.event_types import EventType
+from app.services.sync.replay import replay_vault_events
 
 
 def test_db_dump_event_is_discoverable_and_replayable(monkeypatch, tmp_path) -> None:

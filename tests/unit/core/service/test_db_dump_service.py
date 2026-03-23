@@ -6,14 +6,14 @@ from pathlib import Path
 
 import sqlcipher3
 
-from app.core.service.db_dump_service import (
+from app.infrastructure.persistence.db_dump_service import (
     DB_DUMP_THRESHOLD_BYTES,
     DBDumpService,
     load_device_id,
     restore_latest_db_dump,
 )
-from app.core.sync.event_store import EventStore
-from app.core.sync.event_types import EventType
+from app.infrastructure.persistence.event_store import EventStore
+from app.core.domain.sync.event_types import EventType
 
 
 def test_load_device_id_generates_and_persists_uuid_when_missing(tmp_path: Path) -> None:
@@ -125,7 +125,7 @@ def test_db_dump_service_keeps_only_three_latest_versions(
         ]
     )
     monkeypatch.setattr(
-        "app.core.service.db_dump_service.datetime",
+        "app.infrastructure.persistence.db_dump_service.datetime",
         type(
             "_FakeDatetime",
             (),

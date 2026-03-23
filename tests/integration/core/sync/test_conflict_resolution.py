@@ -1,12 +1,12 @@
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
-from app.core.database.base import Base
-from app.core.database.model.file_reference import FileReference
-from app.core.sync.event_store import EventStore
-from app.core.sync.event_types import EventType
-from app.core.sync.models import HybridLogicalClock, VaultEvent
-from app.core.sync.replay import replay_vault_events
+from app.infrastructure.persistence.db.base import Base
+from app.infrastructure.persistence.db.model.file_reference import FileReference
+from app.infrastructure.persistence.event_store import EventStore
+from app.core.domain.sync.event_types import EventType
+from app.core.domain.sync.models import HybridLogicalClock, VaultEvent
+from app.services.sync.replay import replay_vault_events
 
 
 def test_replay_archives_late_file_add_after_folder_delete(tmp_path) -> None:

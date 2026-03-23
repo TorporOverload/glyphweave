@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from app.core.vault_layout import (
+from app.common.paths.vault_layout import (
     blobs_dir,
     create_vault_layout,
     resolve_blob_path,

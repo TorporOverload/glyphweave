@@ -5,12 +5,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
-from app.core.database.base import Base
-from app.core.database.model.extraction_status import ExtractionStatus
-from app.core.database.model.file_blob_reference import FileBlobReference
-from app.core.database.model.file_entry import FileEntry
-from app.core.database.model.file_reference import FileReference
-from app.core.database.service.search import (
+from app.infrastructure.persistence.db.base import Base
+from app.infrastructure.persistence.db.model.extraction_status import ExtractionStatus
+from app.infrastructure.persistence.db.model.file_blob_reference import FileBlobReference
+from app.infrastructure.persistence.db.model.file_entry import FileEntry
+from app.infrastructure.persistence.db.model.file_reference import FileReference
+from app.infrastructure.persistence.db.service.search import (
     INSERT_SEARCH_INDEX_STATEMENT,
     get_pending_extractions,
     get_retriable_extractions,
@@ -68,7 +68,7 @@ def test_insert_document_content_retries_locked_database(monkeypatch) -> None:
     sleep_calls: list[int] = []
 
     monkeypatch.setattr(
-        "app.core.database.service.search.time.sleep", sleep_calls.append
+        "app.infrastructure.persistence.db.service.search.time.sleep", sleep_calls.append
     )
 
     result = insert_document_content(session, "123", "hello", retries=3)
@@ -89,7 +89,7 @@ def test_insert_document_content_returns_false_after_retry_exhaustion(
         ]
     )
 
-    monkeypatch.setattr("app.core.database.service.search.time.sleep", lambda _: None)
+    monkeypatch.setattr("app.infrastructure.persistence.db.service.search.time.sleep", lambda _: None)
 
     result = insert_document_content(session, "123", "hello", retries=2)
 
@@ -391,14 +391,14 @@ def test_search_content_supports_dhivehi_query(tmp_path) -> None:
     insert_document_content(
         session,
         str(entry.id),
-        """މި ތޫފާނަކީ އިރުމަތީ ޕާކިސްތާނަށް
-        ނުވަތަ މިހާރުގެ ބަންގްލަދޭޝް
-        އަށާއި އިރުމަތީ އިންޑިއާގެ ވެސްޓް ބެންގްލާއަށް 1970ގައި އެރި ތޫފަނެކެވެ. މި
-        ތޫފާނުގައި 500000 އާއި 250000 އާ ދެމެދުގެ މީހުން މަރުވެފައިވަކަމަށް ރިޕޯޓުތަކުން ދައްކައެވެ.""",
+        """Þ‰Þ¨ ÞŒÞ«ÞŠÞ§Þ‚Þ¦Þ†Þ© Þ‡Þ¨ÞƒÞªÞ‰Þ¦ÞŒÞ© Þ•Þ§Þ†Þ¨ÞÞ°ÞŒÞ§Þ‚Þ¦ÞÞ°
+        Þ‚ÞªÞˆÞ¦ÞŒÞ¦ Þ‰Þ¨Þ€Þ§ÞƒÞªÞŽÞ¬ Þ„Þ¦Þ‚Þ°ÞŽÞ°ÞÞ¦Þ‹Þ­ÞÞ°
+        Þ‡Þ¦ÞÞ§Þ‡Þ¨ Þ‡Þ¨ÞƒÞªÞ‰Þ¦ÞŒÞ© Þ‡Þ¨Þ‚Þ°Þ‘Þ¨Þ‡Þ§ÞŽÞ¬ ÞˆÞ¬ÞÞ°Þ“Þ° Þ„Þ¬Þ‚Þ°ÞŽÞ°ÞÞ§Þ‡Þ¦ÞÞ° 1970ÞŽÞ¦Þ‡Þ¨ Þ‡Þ¬ÞƒÞ¨ ÞŒÞ«ÞŠÞ¦Þ‚Þ¬Þ†Þ¬ÞˆÞ¬. Þ‰Þ¨
+        ÞŒÞ«ÞŠÞ§Þ‚ÞªÞŽÞ¦Þ‡Þ¨ 500000 Þ‡Þ§Þ‡Þ¨ 250000 Þ‡Þ§ Þ‹Þ¬Þ‰Þ¬Þ‹ÞªÞŽÞ¬ Þ‰Þ©Þ€ÞªÞ‚Þ° Þ‰Þ¦ÞƒÞªÞˆÞ¬ÞŠÞ¦Þ‡Þ¨ÞˆÞ¦Þ†Þ¦Þ‰Þ¦ÞÞ° ÞƒÞ¨Þ•Þ¯Þ“ÞªÞŒÞ¦Þ†ÞªÞ‚Þ° Þ‹Þ¦Þ‡Þ°Þ†Þ¦Þ‡Þ¬ÞˆÞ¬.""",
     )  # noaq
     session.commit()
 
-    results = search_content(session, "އިރުމަތީ ")
+    results = search_content(session, "Þ‡Þ¨ÞƒÞªÞ‰Þ¦ÞŒÞ© ")
 
     print(results)
 
@@ -425,16 +425,16 @@ def test_search_content_prioritizes_exact_dhivehi_vowel_matches(tmp_path) -> Non
     insert_document_content(
         session,
         str(exact.id),
-        "އިރުމަތީ ޕާކިސްތާނަށް ވާހަކަ",
+        "Þ‡Þ¨ÞƒÞªÞ‰Þ¦ÞŒÞ© Þ•Þ§Þ†Þ¨ÞÞ°ÞŒÞ§Þ‚Þ¦ÞÞ° ÞˆÞ§Þ€Þ¦Þ†Þ¦",
     )
     insert_document_content(
         session,
         str(loose.id),
-        "ޕާކިސްތާނަށް ވާހަކަ އިރުމަތީ",
+        "Þ•Þ§Þ†Þ¨ÞÞ°ÞŒÞ§Þ‚Þ¦ÞÞ° ÞˆÞ§Þ€Þ¦Þ†Þ¦ Þ‡Þ¨ÞƒÞªÞ‰Þ¦ÞŒÞ©",
     )
     session.commit()
 
-    results = search_content(session, "އިރުމަތީ ޕާކިސްތާނަށް")
+    results = search_content(session, "Þ‡Þ¨ÞƒÞªÞ‰Þ¦ÞŒÞ© Þ•Þ§Þ†Þ¨ÞÞ°ÞŒÞ§Þ‚Þ¦ÞÞ°")
 
     assert len(results) == 2
     assert results[0][0] == str(exact.id)

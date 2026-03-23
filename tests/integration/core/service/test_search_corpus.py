@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from app.core.service.extraction_service import ExtractionService
-from app.core.service.vault_file_service import VaultFileService
+from app.services.content.extraction_service import ExtractionService
+from app.services.vault_files.vault_file_service import VaultFileService
 
 TEST_CORPUS_DIR = (
     Path(__file__).resolve().parents[4] / "test_data" / "test_corpus"
@@ -46,7 +46,7 @@ def test_search_indexes_corpus_filenames_and_phrases(
     assert corpus_files, "Expected supported files in test corpus"
 
     monkeypatch.setattr(
-        "app.core.service.extraction_service._run_kreuzberg_extraction",
+        "app.services.content.extraction_service._run_kreuzberg_extraction",
         _fake_extract,
     )
 

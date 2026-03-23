@@ -10,17 +10,17 @@ from sqlalchemy.orm import sessionmaker
 
 os.environ.setdefault("GLYPHWEAVE_DEBUG", "0")
 
-from app.core.crypto.primitives.secure_memory import SecureMemory
-from app.core.crypto.service.encryption_service import EncryptionService
-from app.core.crypto.service.key_service import KeyService
-from app.core.crypto.types import KDFParams, VaultKeyFile, WrappedKey
-from app.core.database.base import Base
-from app.core.database.model.search_index import register_ddl_listeners
-from app.core.database.service.file_service import FileService
-from app.core.database.service.folder_service import FolderService
-from app.core.service.models import VaultContext
-from app.core.service.vault_file_service import VaultFileService
-from app.core.vault_layout import create_vault_layout
+from app.infrastructure.crypto.primitives.secure_memory import SecureMemory
+from app.infrastructure.crypto.service.encryption_service import EncryptionService
+from app.infrastructure.crypto.service.key_service import KeyService
+from app.infrastructure.crypto.types import KDFParams, VaultKeyFile, WrappedKey
+from app.infrastructure.persistence.db.base import Base
+from app.infrastructure.persistence.db.model.search_index import register_ddl_listeners
+from app.infrastructure.persistence.db.service.file_service import FileService
+from app.infrastructure.persistence.db.service.folder_service import FolderService
+from app.services.models import VaultContext
+from app.services.vault_files.vault_file_service import VaultFileService
+from app.common.paths.vault_layout import create_vault_layout
 
 
 @pytest.fixture(scope="session")
@@ -54,8 +54,8 @@ def local_data_path(tmp_path: Path) -> Path:
 
 @pytest.fixture(scope="function")
 def db_engine(temp_vault_path: Path, test_master_key: bytes, test_vault_id: bytes):
-    from app.core.crypto.primitives.key_derivation import derive_subkey
-    from app.core.crypto.types import KeyPurpose
+    from app.infrastructure.crypto.primitives.key_derivation import derive_subkey
+    from app.infrastructure.crypto.types import KeyPurpose
 
     db_path = temp_vault_path / "test.db"
     db_key_bytes = derive_subkey(

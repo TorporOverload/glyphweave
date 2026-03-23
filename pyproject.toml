@@ -12,10 +12,11 @@ dependencies = [
     "sqlalchemy>=2.0.46",
     "sqlcipher3-wheels>=0.5.7",
     "watchdog>=6.0.0",
+    "PySide6>=6.10.2",
 ]
 
 [project.scripts]
-glyphweave = "app.main:main"
+glyphweave = "app.ui.cli.main:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -40,4 +41,4 @@ ignore = ["S101"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-norecursedirs = ["_tmp", "test_runs_tmp", ".pytest_tmp", ".pytest_tmp_run1", ".test_tmp", "__pycache__"]
+

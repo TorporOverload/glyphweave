@@ -2,9 +2,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
-from app.core.crypto.primitives.secure_memory import SecureMemory
-from app.core.service.models import VaultContext
-from app.core.service.vault_runtime_bootstrap import _index_replayed_entries
+from app.infrastructure.crypto.primitives.secure_memory import SecureMemory
+from app.services.models import VaultContext
+from app.services.runtime.vault_runtime_bootstrap import _index_replayed_entries
 
 
 @contextmanager
@@ -41,15 +41,15 @@ def test_index_replayed_entries_indexes_supported_pending_files(
     )
 
     monkeypatch.setattr(
-        "app.core.service.vault_runtime_bootstrap.session_scope",
+        "app.services.runtime.vault_runtime_bootstrap.session_scope",
         _fake_session_scope,
     )
     monkeypatch.setattr(
-        "app.core.service.vault_runtime_bootstrap.get_retriable_extractions",
+        "app.services.runtime.vault_runtime_bootstrap.get_retriable_extractions",
         lambda session, limit=500: [entry],
     )
     monkeypatch.setattr(
-        "app.core.service.vault_runtime_bootstrap.IndexingService",
+        "app.services.runtime.vault_runtime_bootstrap.IndexingService",
         _FakeIndexingService,
     )
 

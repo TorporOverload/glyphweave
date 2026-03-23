@@ -1,10 +1,10 @@
 import json
 
-import app.core.sync.hlc as hlc_module
-from app.core.sync.event_store import EventStore
-from app.core.sync.event_types import EventType
-from app.core.sync.event_emitter import EventEmitter
-from app.core.sync.models import HybridLogicalClock, VaultEvent
+import app.core.domain.sync.hlc as hlc_module
+from app.infrastructure.persistence.event_store import EventStore
+from app.core.domain.sync.event_types import EventType
+from app.services.sync.event_emitter import EventEmitter
+from app.core.domain.sync.models import HybridLogicalClock, VaultEvent
 
 
 class _Blob:
@@ -96,3 +96,4 @@ def test_event_emitter_observes_existing_remote_hlc_on_startup(monkeypatch, tmp_
         logical=6,
         device_id="device-a",
     )
+

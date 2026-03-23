@@ -1,15 +1,15 @@
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
-from app.core.database.base import Base
-from app.core.database.model.file_entry import FileEntry
-from app.core.database.model.file_reference import FileReference
-from app.core.database.model.processed_event import ProcessedEvent
-from app.core.database.model.sync_node_state import SyncNodeState
-from app.core.database.model.sync_tombstone import SyncTombstone
-from app.core.sync.event_processor import EventProcessor
-from app.core.sync.event_types import EventType
-from app.core.sync.models import DiscoveredEvent, HybridLogicalClock, VaultEvent
+from app.infrastructure.persistence.db.base import Base
+from app.infrastructure.persistence.db.model.file_entry import FileEntry
+from app.infrastructure.persistence.db.model.file_reference import FileReference
+from app.infrastructure.persistence.db.model.processed_event import ProcessedEvent
+from app.infrastructure.persistence.db.model.sync_node_state import SyncNodeState
+from app.infrastructure.persistence.db.model.sync_tombstone import SyncTombstone
+from app.services.sync.event_processor import EventProcessor
+from app.core.domain.sync.event_types import EventType
+from app.core.domain.sync.models import DiscoveredEvent, HybridLogicalClock, VaultEvent
 
 
 def _build_processor(tmp_path):
@@ -510,3 +510,4 @@ def test_folder_delete_removes_descendants_recursively(tmp_path) -> None:
         )
         assert refs == []
         assert tombstone is not None
+

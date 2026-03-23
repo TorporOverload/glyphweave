@@ -2,8 +2,8 @@
 
 import pytest
 
-from app.core.fuse.file_handle import FileHandleManager
-from app.core.fuse.types import FileMeta
+from app.infrastructure.fuse.file_handle import FileHandleManager
+from app.infrastructure.fuse.types import FileMeta
 
 
 class _DummyChunkStore:

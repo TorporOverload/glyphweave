@@ -2,7 +2,7 @@ import json
 import uuid
 from pathlib import Path
 
-from app.config import ensure_app_data_layout
+from app.common.config import ensure_app_data_layout
 
 
 def test_ensure_app_data_layout_creates_expected_structure(tmp_path: Path) -> None:

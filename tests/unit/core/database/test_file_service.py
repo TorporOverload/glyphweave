@@ -1,12 +1,12 @@
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
-from app.core.database.base import Base
-from app.core.database.model.file_reference import FileReference
-from app.core.database.service.file_service import FileService
-from app.core.database.service.folder_service import FolderService
-from app.core.database.service.session import session_scope
-from app.core.database.service.sync_bootstrap import bootstrap_file_reference_node_ids
+from app.infrastructure.persistence.db.base import Base
+from app.infrastructure.persistence.db.model.file_reference import FileReference
+from app.infrastructure.persistence.db.service.file_service import FileService
+from app.infrastructure.persistence.db.service.folder_service import FolderService
+from app.infrastructure.persistence.db.service.session import session_scope
+from app.infrastructure.persistence.db.service.sync_bootstrap import bootstrap_file_reference_node_ids
 
 
 def _build_services(tmp_path):

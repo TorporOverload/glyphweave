@@ -1,9 +1,9 @@
 from pathlib import Path
 
-from app.core.service.models import VaultContext
-from app.core.service.registry_service import load_registry, write_vault_metadata
-from app.core.service.vault_runtime_service import VaultRuntimeService
-from app.core.service.vault_service import VaultService
+from app.services.models import VaultContext
+from app.infrastructure.persistence.registry_service import load_registry, write_vault_metadata
+from app.services.runtime.vault_runtime_service import VaultRuntimeService
+from app.services.vault_service import VaultService
 
 
 def test_vault_runtime_service_imports_unregistered_vault(tmp_path: Path) -> None:

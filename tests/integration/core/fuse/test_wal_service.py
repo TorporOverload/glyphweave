@@ -144,7 +144,7 @@ class TestWalService:
         wal_service.mark_flushed([entry1.id])
 
         # Check status using a fresh session (services use their own sessions)
-        from app.core.database.model.WAL_entry import WalEntry
+        from app.infrastructure.persistence.db.model.WAL_entry import WalEntry
         verify_session = db_session
         verify_session.expire_all()
         refreshed_entry1 = verify_session.get(WalEntry, entry1.id)

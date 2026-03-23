@@ -1,9 +1,9 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-import app.core.service.vault_file_sessions as sessions_module
-from app.core.service.models import PendingFallbackOpen, VaultContext
-from app.core.service.vault_file_sessions import (
+import app.services.vault_files.vault_file_sessions as sessions_module
+from app.services.models import PendingFallbackOpen, VaultContext
+from app.services.vault_files.vault_file_sessions import (
     cleanup_unlocked_files,
     list_fallback_unlocked_files,
     list_unlocked_files,

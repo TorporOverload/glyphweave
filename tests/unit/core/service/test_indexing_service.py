@@ -8,9 +8,9 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy.orm.exc import DetachedInstanceError
 
-from app.core.database.model.extraction_status import ExtractionStatus
-from app.core.service.extraction_service import ExtractionResult
-from app.core.service.indexing_service import IndexingService
+from app.infrastructure.persistence.db.model.extraction_status import ExtractionStatus
+from app.services.content.extraction_service import ExtractionResult
+from app.services.content.indexing_service import IndexingService
 
 
 class _FakeEncryptionService:
@@ -180,22 +180,22 @@ def test_index_source_file_uses_plaintext_without_decrypting(
     events: list[tuple] = []
 
     monkeypatch.setattr(
-        "app.core.service.indexing_service.ExtractionService.extract",
+        "app.services.content.indexing_service.ExtractionService.extract",
         lambda path: ExtractionResult(content="hello", preview="hello", metadata={}),
     )
     monkeypatch.setattr(
-        "app.core.service.indexing_service.session_scope",
+        "app.services.content.indexing_service.session_scope",
         lambda *args, **kwargs: _fake_session_scope(session),
     )
     monkeypatch.setattr(
-        "app.core.service.indexing_service.insert_document_content",
+        "app.services.content.indexing_service.insert_document_content",
         lambda current_session, file_entry_id, content: events.append(
             ("insert", current_session, file_entry_id, content)
         )
         or True,
     )
     monkeypatch.setattr(
-        "app.core.service.indexing_service.update_extraction_status",
+        "app.services.content.indexing_service.update_extraction_status",
         lambda current_session,
         file_entry_id,
         status,
@@ -237,21 +237,21 @@ def test_index_file_entry_reloades_detached_entry_blobs(
         return _fake_session_scope(write_session)
 
     monkeypatch.setattr(
-        "app.core.service.indexing_service.session_scope",
+        "app.services.content.indexing_service.session_scope",
         _session_scope,
     )
     monkeypatch.setattr(service, "_decrypt_to_temp", lambda *args: temp_path)
     monkeypatch.setattr(
-        "app.core.service.indexing_service.ExtractionService.extract",
+        "app.services.content.indexing_service.ExtractionService.extract",
         lambda path: ExtractionResult(content="hello", preview="hello", metadata={}),
     )
     monkeypatch.setattr(
-        "app.core.service.indexing_service.insert_document_content",
+        "app.services.content.indexing_service.insert_document_content",
         lambda current_session, file_entry_id, content: True,
     )
     status_calls: list[tuple] = []
     monkeypatch.setattr(
-        "app.core.service.indexing_service.update_extraction_status",
+        "app.services.content.indexing_service.update_extraction_status",
         lambda current_session,
         file_entry_id,
         status,
@@ -286,26 +286,26 @@ def test_index_file_entry_indexes_supported_file(
 
     monkeypatch.setattr(service, "_decrypt_to_temp", lambda *args: temp_path)
     monkeypatch.setattr(
-        "app.core.service.indexing_service.ExtractionService.extract",
+        "app.services.content.indexing_service.ExtractionService.extract",
         lambda path: ExtractionResult(
-            content="ދިވެހި ބަސް",
-            preview="ދިވެހި",
+            content="Þ‹Þ¨ÞˆÞ¬Þ€Þ¨ Þ„Þ¦ÞÞ°",
+            preview="Þ‹Þ¨ÞˆÞ¬Þ€Þ¨",
             metadata={"lang": "dv"},
         ),
     )
     monkeypatch.setattr(
-        "app.core.service.indexing_service.session_scope",
+        "app.services.content.indexing_service.session_scope",
         lambda *args, **kwargs: _fake_session_scope(session),
     )
     monkeypatch.setattr(
-        "app.core.service.indexing_service.insert_document_content",
+        "app.services.content.indexing_service.insert_document_content",
         lambda current_session, file_entry_id, content: events.append(
             ("insert", current_session, file_entry_id, content)
         )
         or True,
     )
     monkeypatch.setattr(
-        "app.core.service.indexing_service.update_extraction_status",
+        "app.services.content.indexing_service.update_extraction_status",
         lambda current_session,
         file_entry_id,
         status,
@@ -318,9 +318,9 @@ def test_index_file_entry_indexes_supported_file(
     result = service.index_file_entry(entry, "report.txt")
 
     assert result is True
-    assert events[0] == ("insert", session, 1, "ދިވެހި ބަސް")
+    assert events[0] == ("insert", session, 1, "Þ‹Þ¨ÞˆÞ¬Þ€Þ¨ Þ„Þ¦ÞÞ°")
     assert events[1][0:4] == ("status", session, 1, ExtractionStatus.DONE)
-    assert events[1][4] == "ދިވެހި"
+    assert events[1][4] == "Þ‹Þ¨ÞˆÞ¬Þ€Þ¨"
     metadata = json.loads(events[1][5])
     assert metadata["file_name"] == "temp.txt"
     assert metadata["extension"] == ".txt"
@@ -340,7 +340,7 @@ def test_index_file_entry_marks_failed_on_extraction_error(
 
     monkeypatch.setattr(service, "_decrypt_to_temp", lambda *args: temp_path)
     monkeypatch.setattr(
-        "app.core.service.indexing_service.ExtractionService.extract",
+        "app.services.content.indexing_service.ExtractionService.extract",
         lambda path: ExtractionResult(error="extract failed", metadata={"kind": "txt"}),
     )
     monkeypatch.setattr(
@@ -373,7 +373,7 @@ def test_index_file_entry_marks_done_for_empty_content(
 
     monkeypatch.setattr(service, "_decrypt_to_temp", lambda *args: temp_path)
     monkeypatch.setattr(
-        "app.core.service.indexing_service.ExtractionService.extract",
+        "app.services.content.indexing_service.ExtractionService.extract",
         lambda path: ExtractionResult(content="   ", preview="", metadata={"empty": True}),
     )
     monkeypatch.setattr(
@@ -407,19 +407,19 @@ def test_index_file_entry_marks_failed_when_insert_fails(
 
     monkeypatch.setattr(service, "_decrypt_to_temp", lambda *args: temp_path)
     monkeypatch.setattr(
-        "app.core.service.indexing_service.ExtractionService.extract",
+        "app.services.content.indexing_service.ExtractionService.extract",
         lambda path: ExtractionResult(content="hello", preview="hello", metadata={}),
     )
     monkeypatch.setattr(
-        "app.core.service.indexing_service.session_scope",
+        "app.services.content.indexing_service.session_scope",
         lambda *args, **kwargs: _fake_session_scope(session),
     )
     monkeypatch.setattr(
-        "app.core.service.indexing_service.insert_document_content",
+        "app.services.content.indexing_service.insert_document_content",
         lambda current_session, file_entry_id, content: False,
     )
     monkeypatch.setattr(
-        "app.core.service.indexing_service.update_extraction_status",
+        "app.services.content.indexing_service.update_extraction_status",
         lambda current_session,
         file_entry_id,
         status,
@@ -455,7 +455,7 @@ def test_index_file_entry_cleans_temp_file_on_unexpected_exception(
         raise RuntimeError("boom")
 
     monkeypatch.setattr(
-        "app.core.service.indexing_service.ExtractionService.extract",
+        "app.services.content.indexing_service.ExtractionService.extract",
         _raise,
     )
     monkeypatch.setattr(

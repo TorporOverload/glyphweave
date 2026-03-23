@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from app.core.service.safe_paths import safe_cache_path
-from app.utils.file_extensions import ensure_extension_from_mime
+from app.common.paths.safe_paths import safe_cache_path
+from app.common.file_extensions import ensure_extension_from_mime
 
 
 def test_safe_cache_path_strips_traversal_segments(tmp_path: Path):

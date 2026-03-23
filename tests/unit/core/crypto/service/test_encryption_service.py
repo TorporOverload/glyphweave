@@ -2,16 +2,16 @@ import pytest
 import os
 from pathlib import Path
 
-from app.core.crypto.service import EncryptionService
-from app.core.crypto.constants import (
+from app.infrastructure.crypto.service import EncryptionService
+from app.infrastructure.crypto.constants import (
     CHUNK_SIZE,
     CHUNKED_VERSION,
     FILE_HEADER_SIZE_BYTES,
 )
-from app.core.crypto.primitives.aes_gcm import AESGCMCipher
-from app.core.crypto.types import KeyPurpose
-from app.core.crypto.primitives.key_derivation import derive_subkey
-from app.core.vault_layout import resolve_blob_path, writable_blobs_dir
+from app.infrastructure.crypto.primitives.aes_gcm import AESGCMCipher
+from app.infrastructure.crypto.types import KeyPurpose
+from app.infrastructure.crypto.primitives.key_derivation import derive_subkey
+from app.common.paths.vault_layout import resolve_blob_path, writable_blobs_dir
 
 
 class TestEncryptionService:

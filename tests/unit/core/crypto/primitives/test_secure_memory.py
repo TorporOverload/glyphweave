@@ -2,9 +2,9 @@ import ctypes
 
 import pytest
 
-from app.core.crypto.primitives import secure_memory as sm
-from app.core.crypto.primitives.secure_memory import SecureMemory
-from app.exceptions.crypto import SecureMemoryError
+from app.infrastructure.crypto.primitives import secure_memory as sm
+from app.infrastructure.crypto.primitives.secure_memory import SecureMemory
+from app.common.exceptions.crypto import SecureMemoryError
 
 
 def _arg_value(value):
