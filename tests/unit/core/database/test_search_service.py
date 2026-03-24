@@ -7,7 +7,9 @@ from sqlalchemy.orm import sessionmaker
 
 from app.infrastructure.persistence.db.base import Base
 from app.infrastructure.persistence.db.model.extraction_status import ExtractionStatus
-from app.infrastructure.persistence.db.model.file_blob_reference import FileBlobReference
+from app.infrastructure.persistence.db.model.file_blob_reference import (
+    FileBlobReference,
+)
 from app.infrastructure.persistence.db.model.file_entry import FileEntry
 from app.infrastructure.persistence.db.model.file_reference import FileReference
 from app.infrastructure.persistence.db.service.search import (
@@ -68,7 +70,8 @@ def test_insert_document_content_retries_locked_database(monkeypatch) -> None:
     sleep_calls: list[int] = []
 
     monkeypatch.setattr(
-        "app.infrastructure.persistence.db.service.search.time.sleep", sleep_calls.append
+        "app.infrastructure.persistence.db.service.search.time.sleep",
+        sleep_calls.append,
     )
 
     result = insert_document_content(session, "123", "hello", retries=3)
@@ -89,7 +92,9 @@ def test_insert_document_content_returns_false_after_retry_exhaustion(
         ]
     )
 
-    monkeypatch.setattr("app.infrastructure.persistence.db.service.search.time.sleep", lambda _: None)
+    monkeypatch.setattr(
+        "app.infrastructure.persistence.db.service.search.time.sleep", lambda _: None
+    )
 
     result = insert_document_content(session, "123", "hello", retries=2)
 
@@ -311,6 +316,84 @@ def test_search_file_references_supports_boolean_queries(tmp_path) -> None:
 
     assert len(results) == 1
     assert results[0][1] == "budget-report.txt"
+
+
+def test_search_file_references_supports_lowercase_boolean_queries(tmp_path) -> None:
+    session = _build_session(tmp_path)
+    a = _add_file_entry(session, file_id="f-name-4b", content_hash="h-name-4b")
+    b = _add_file_entry(session, file_id="f-name-5b", content_hash="h-name-5b")
+    session.add(
+        FileReference(
+            name="budget-report.txt",
+            is_folder=False,
+            file_entry_id=a.id,
+            virtual_path="/docs/budget-report.txt",
+        )
+    )
+    session.add(
+        FileReference(
+            name="budget-notes.txt",
+            is_folder=False,
+            file_entry_id=b.id,
+            virtual_path="/docs/budget-notes.txt",
+        )
+    )
+    session.commit()
+
+    results = search_file_references(session, "budget and report", limit=10)
+
+    assert len(results) == 1
+    assert results[0][1] == "budget-report.txt"
+
+
+def test_search_content_supports_lowercase_boolean_queries(tmp_path) -> None:
+    session = _build_session(tmp_path)
+    first = _add_file_entry(
+        session,
+        file_id="f-content-1",
+        content_hash="h-content-1",
+        status=ExtractionStatus.DONE.value,
+    )
+    second = _add_file_entry(
+        session,
+        file_id="f-content-2",
+        content_hash="h-content-2",
+        status=ExtractionStatus.DONE.value,
+    )
+    insert_document_content(session, str(first.id), "budget report overview")
+    insert_document_content(session, str(second.id), "budget notes only")
+    session.commit()
+
+    results = search_content(session, "budget and report")
+
+    assert len(results) == 1
+    assert results[0][0] == str(first.id)
+
+
+def test_search_content_preserves_quoted_phrase_with_lowercase_operators(
+    tmp_path,
+) -> None:
+    session = _build_session(tmp_path)
+    first = _add_file_entry(
+        session,
+        file_id="f-content-3",
+        content_hash="h-content-3",
+        status=ExtractionStatus.DONE.value,
+    )
+    second = _add_file_entry(
+        session,
+        file_id="f-content-4",
+        content_hash="h-content-4",
+        status=ExtractionStatus.DONE.value,
+    )
+    insert_document_content(session, str(first.id), 'budget report "exact phrase"')
+    insert_document_content(session, str(second.id), 'budget report "phrase only"')
+    session.commit()
+
+    results = search_content(session, 'budget and "exact phrase"', limit=10)
+
+    assert len(results) == 1
+    assert results[0][0] == str(first.id)
 
 
 def test_search_file_references_updates_after_rename(tmp_path) -> None:

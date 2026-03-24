@@ -81,6 +81,10 @@ DHIVEHI_VOWEL_SIGNS = frozenset(
 )
 
 FTS_BOOLEAN_OPERATOR_PATTERN = re.compile(r"\b(?:AND|OR|NOT)\b")
+FTS_BOOLEAN_OPERATOR_NORMALIZE_PATTERN = re.compile(
+    r"\b(and|or|not)\b",
+    re.IGNORECASE,
+)
 FTS_QUERY_TOKEN_PATTERN = re.compile(r"[^\W_]+", re.UNICODE)
 
 
@@ -88,21 +92,32 @@ def _contains_dhivehi_vowel_signs(text_value: str) -> bool:
     return any(char in DHIVEHI_VOWEL_SIGNS for char in text_value)
 
 
-def _prepare_fts_match_query(text_value: str, *, prefix_terms: bool) -> str:
-    if (
-        not text_value
-        or '"' in text_value
-        or "(" in text_value
-        or ")" in text_value
-        or "*" in text_value
-        or ":" in text_value
-        or FTS_BOOLEAN_OPERATOR_PATTERN.search(text_value)
-    ):
-        return text_value
+def _normalize_boolean_operators(text_value: str) -> str:
+    parts = text_value.split('"')
+    for index in range(0, len(parts), 2):
+        parts[index] = FTS_BOOLEAN_OPERATOR_NORMALIZE_PATTERN.sub(
+            lambda match: match.group(1).upper(),
+            parts[index],
+        )
+    return '"'.join(parts)
 
-    terms = FTS_QUERY_TOKEN_PATTERN.findall(text_value)
+
+def _prepare_fts_match_query(text_value: str, *, prefix_terms: bool) -> str:
+    normalized_text = _normalize_boolean_operators(text_value)
+    if (
+        not normalized_text
+        or '"' in normalized_text
+        or "(" in normalized_text
+        or ")" in normalized_text
+        or "*" in normalized_text
+        or ":" in normalized_text
+        or FTS_BOOLEAN_OPERATOR_PATTERN.search(normalized_text)
+    ):
+        return normalized_text
+
+    terms = FTS_QUERY_TOKEN_PATTERN.findall(normalized_text)
     if not terms:
-        return text_value
+        return normalized_text
 
     if prefix_terms:
         return " ".join(f"{term}*" for term in terms)
@@ -123,8 +138,7 @@ def insert_document_content(
     content: str,
     retries: int = 3,
 ) -> bool:
-    """Insert file content into the FTS index.
-    """
+    """Insert file content into the FTS index."""
     params = {"file_entry_id": file_entry_id, "content": content}
 
     for attempt in range(retries):
@@ -216,12 +230,14 @@ def get_pending_extractions(
     """Return file entries pending text extraction."""
     from app.infrastructure.persistence.db.model.file_entry import FileEntry
 
-    return list(session.scalars(
-        select(FileEntry)
-        .where(FileEntry.text_extraction_status == ExtractionStatus.PENDING.value)
-        .order_by(FileEntry.id)
-        .limit(limit)
-    ).all())
+    return list(
+        session.scalars(
+            select(FileEntry)
+            .where(FileEntry.text_extraction_status == ExtractionStatus.PENDING.value)
+            .order_by(FileEntry.id)
+            .limit(limit)
+        ).all()
+    )
 
 
 def get_retriable_extractions(
@@ -233,21 +249,24 @@ def get_retriable_extractions(
 
     from app.infrastructure.persistence.db.model.file_entry import FileEntry
 
-    return list(session.scalars(
-        select(FileEntry)
-        .options(
-            joinedload(FileEntry.references),
-            joinedload(FileEntry.blobs),
-        )
-        .where(
-            FileEntry.text_extraction_status.in_(
-                (
-                    ExtractionStatus.PENDING.value,
-                    ExtractionStatus.FAILED.value,
+    return list(
+        session.scalars(
+            select(FileEntry)
+            .options(
+                joinedload(FileEntry.references),
+                joinedload(FileEntry.blobs),
+            )
+            .where(
+                FileEntry.text_extraction_status.in_(
+                    (
+                        ExtractionStatus.PENDING.value,
+                        ExtractionStatus.FAILED.value,
+                    )
                 )
             )
+            .order_by(FileEntry.id)
+            .limit(limit)
         )
-        .order_by(FileEntry.id)
-        .limit(limit)
-    ).unique().all())
-
+        .unique()
+        .all()
+    )
