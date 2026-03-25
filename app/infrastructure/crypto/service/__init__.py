@@ -17,4 +17,3 @@ __all__ = [
     "compute_hash",
     "load_vault_key",
 ]
-

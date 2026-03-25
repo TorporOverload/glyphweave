@@ -14,8 +14,8 @@ from app.core.domain.sync.models import HybridLogicalClock, VaultEvent
 class EventEmitter:
     """Emit local vault mutations into the append-only event store."""
 
-    def __init__(self, vault_path: Path, app_data_dir: Path) -> None:
-        self._store = EventStore(vault_path)
+    def __init__(self, store: EventStore, app_data_dir: Path) -> None:
+        self._store = store
         self._device_id = load_device_id(app_data_dir)
         self._clock = HLCClock(device_id=self._device_id)
         self._observe_existing_events()

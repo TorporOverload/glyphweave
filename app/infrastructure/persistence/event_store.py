@@ -4,10 +4,20 @@ import json
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
+from app.common.paths.vault_layout import EVENTS_DIR
 from app.core.domain.sync.hashing import hash_event
 from app.core.domain.sync.models import DiscoveredEvent, VaultEvent
-from app.common.paths.vault_layout import EVENTS_DIR
+
+from .event_crypto import (
+    decrypt_event,
+    encrypt_event,
+    is_encrypted_envelope,
+    is_plaintext_envelope,
+    plaintext_envelope,
+)
+from .event_store_config import EventStoreConfig
 
 OBJECTS_DIR = "objects"
 ROOTS_DIR = "roots"
@@ -20,8 +30,11 @@ class EventIntegrityError(ValueError):
 class EventStore:
     """Append-only Merkle-style event store rooted inside a vault."""
 
-    def __init__(self, vault_path: Path) -> None:
-        self._vault_path = Path(vault_path)
+    def __init__(self, config: EventStoreConfig | Path) -> None:
+        self._config = config if isinstance(config, EventStoreConfig) else None
+        self._vault_path = Path(
+            config.vault_path if isinstance(config, EventStoreConfig) else config
+        )
 
     @property
     def events_dir(self) -> Path:
@@ -50,7 +63,10 @@ class EventStore:
         if not object_path.exists():
             object_path.write_text(
                 json.dumps(
-                    stored.to_dict(), sort_keys=True, indent=2, ensure_ascii=False
+                    self._serialize_event_payload(stored, event_hash),
+                    sort_keys=True,
+                    indent=2,
+                    ensure_ascii=False,
                 ),
                 encoding="utf-8",
             )
@@ -68,13 +84,16 @@ class EventStore:
     def load_event(self, event_hash: str, *, verify: bool = True) -> VaultEvent:
         path = self.object_path(event_hash)
         payload = json.loads(path.read_text(encoding="utf-8"))
-        event = VaultEvent.from_dict(payload)
+        event = self._deserialize_event_payload(payload, event_hash)
         if verify:
             self.verify_event(event, expected_hash=event_hash)
         return event
 
     def verify_event(
-        self, event: VaultEvent, *, expected_hash: str | None = None
+        self,
+        event: VaultEvent,
+        *,
+        expected_hash: str | None = None,
     ) -> None:
         computed_hash = hash_event(event)
         target_hash = expected_hash or event.event_hash
@@ -96,7 +115,7 @@ class EventStore:
             if skip_hashes is not None and event_hash in skip_hashes:
                 continue
             payload = json.loads(path.read_text(encoding="utf-8"))
-            event = VaultEvent.from_dict(payload)
+            event = self._deserialize_event_payload(payload, event_hash)
             self.verify_event(event, expected_hash=event_hash)
             discovered.append(DiscoveredEvent(event=event, source_path=str(path)))
         return discovered
@@ -121,3 +140,35 @@ class EventStore:
             encoding="utf-8",
         )
 
+    def _serialize_event_payload(
+        self, event: VaultEvent, event_hash: str
+    ) -> dict[str, Any]:
+        if self._config is None:
+            return event.to_dict()
+        if self._config.encryption_enabled:
+            return encrypt_event(
+                event=event, event_hash=event_hash, config=self._config
+            )
+        return plaintext_envelope(event=event, event_hash=event_hash)
+
+    def _deserialize_event_payload(
+        self,
+        payload: dict[str, Any],
+        event_hash: str,
+    ) -> VaultEvent:
+        if is_encrypted_envelope(payload):
+            if self._config is None:
+                raise EventIntegrityError(
+                    "Encrypted event object requires an initialized EventStoreConfig"
+                )
+            event = decrypt_event(envelope=payload, config=self._config)
+        elif is_plaintext_envelope(payload):
+            event = VaultEvent.from_dict(dict(payload.get("event", {})))
+        else:
+            event = VaultEvent.from_dict(payload)
+
+        if event.event_hash is not None and event.event_hash != event_hash:
+            raise EventIntegrityError(
+                "Event payload hash does not match object filename hash"
+            )
+        return event

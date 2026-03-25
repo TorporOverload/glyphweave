@@ -1,16 +1,30 @@
-from app.infrastructure.persistence.event_store import EventStore
-from app.core.domain.sync.event_types import EventType
-from app.core.domain.sync.models import HybridLogicalClock, VaultEvent
-from app.services.sync.replay import replay_vault_events
-from app.infrastructure.persistence.db.base import Base
-from app.infrastructure.persistence.db.model.file_reference import FileReference
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+
+from app.core.domain.sync.event_types import EventType
+from app.core.domain.sync.models import HybridLogicalClock, VaultEvent
+from app.infrastructure.crypto.primitives.secure_memory import SecureMemory
+from app.infrastructure.persistence.db.base import Base
+from app.infrastructure.persistence.db.model.file_reference import FileReference
+from app.infrastructure.persistence.event_store import EventStore
+from app.infrastructure.persistence.event_store_config import EventStoreConfig
+from app.services.sync.replay import replay_vault_events
+
+
+def _store(vault_path) -> EventStore:
+    return EventStore(
+        EventStoreConfig(
+            vault_path=vault_path,
+            vault_id="vault-1",
+            master_key=SecureMemory(b"k" * 32),
+            encryption_enabled=True,
+        )
+    )
 
 
 def test_replay_vault_events_sorts_by_hlc_before_applying(tmp_path) -> None:
     vault_path = tmp_path / "vault"
-    store = EventStore(vault_path)
+    store = _store(vault_path)
     early = VaultEvent(
         event_id="evt-early",
         type=EventType.FOLDER_CREATE,
@@ -46,7 +60,11 @@ def test_replay_vault_events_sorts_by_hlc_before_applying(tmp_path) -> None:
     Base.metadata.create_all(engine)
     session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
-    result = replay_vault_events(session_factory=session_factory, vault_path=vault_path)
+    result = replay_vault_events(
+        session_factory=session_factory,
+        vault_path=vault_path,
+        store=store,
+    )
 
     assert result.total == 2
     assert result.failed == 0
@@ -59,7 +77,7 @@ def test_replay_vault_events_sorts_by_hlc_before_applying(tmp_path) -> None:
 
 def test_replay_vault_events_only_applies_new_events(tmp_path) -> None:
     vault_path = tmp_path / "vault"
-    store = EventStore(vault_path)
+    store = _store(vault_path)
     create_docs = VaultEvent(
         event_id="evt-folder",
         type=EventType.FOLDER_CREATE,
@@ -114,17 +132,29 @@ def test_replay_vault_events_only_applies_new_events(tmp_path) -> None:
     Base.metadata.create_all(engine)
     session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
-    first = replay_vault_events(session_factory=session_factory, vault_path=vault_path)
+    first = replay_vault_events(
+        session_factory=session_factory,
+        vault_path=vault_path,
+        store=store,
+    )
     assert first.total == 2
     assert first.failed == 0
 
-    second = replay_vault_events(session_factory=session_factory, vault_path=vault_path)
+    second = replay_vault_events(
+        session_factory=session_factory,
+        vault_path=vault_path,
+        store=store,
+    )
     assert second.total == 0
     assert second.failed == 0
 
     store.append_event(add_notes)
 
-    third = replay_vault_events(session_factory=session_factory, vault_path=vault_path)
+    third = replay_vault_events(
+        session_factory=session_factory,
+        vault_path=vault_path,
+        store=store,
+    )
     assert third.total == 1
     assert third.failed == 0
 
@@ -137,4 +167,3 @@ def test_replay_vault_events_only_applies_new_events(tmp_path) -> None:
             "/docs/notes.txt",
             "/docs/report.txt",
         ]
-

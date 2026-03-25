@@ -14,10 +14,10 @@ from watchdog.observers import Observer
 
 from app.infrastructure.persistence.db.model.processed_event import ProcessedEvent
 from app.infrastructure.persistence.db.service.session import session_scope
+from app.infrastructure.persistence.event_store import EventStore
 from app.common.logging import logger
 
 from app.core.domain.sync.models import DiscoveredEvent
-from app.infrastructure.persistence.event_store import EventStore
 from .replay import is_event_ready_for_replay, replay_vault_events
 
 INITIAL_REPLAY_DELAY_SECONDS = 10.0
@@ -69,10 +69,16 @@ class _EventObjectHandler(FileSystemEventHandler):
 
 
 class EventReplayRuntime:
-    def __init__(self, *, context: Any, on_replayed: Callable[[Any], None]) -> None:
+    def __init__(
+        self,
+        *,
+        context: Any,
+        store: EventStore,
+        on_replayed: Callable[[Any], None],
+    ) -> None:
         self._context = context
         self._on_replayed = on_replayed
-        self._store = EventStore(context.require_vault_path())
+        self._store = store
         self._condition = Condition()
         self._pending: dict[str, float] = {}
         self._queue: list[_ScheduledReplay] = []
@@ -177,6 +183,7 @@ class EventReplayRuntime:
             result = replay_vault_events(
                 session_factory=self._context.session_factory,
                 vault_path=self._context.require_vault_path(),
+                store=self._store,
             )
             if result.total > 0:
                 self._on_replayed(self._context)

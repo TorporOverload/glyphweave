@@ -99,6 +99,7 @@ class DBDumpService:
         db_path: Path,
         db_key_hex: str,
         device_id: str,
+        event_store: EventStore,
         threshold_bytes: int = DB_DUMP_THRESHOLD_BYTES,
         max_backups: int = DB_DUMP_MAX_BACKUPS,
     ) -> None:
@@ -106,6 +107,7 @@ class DBDumpService:
         self._db_path = Path(db_path)
         self._db_key_hex = db_key_hex
         self._device_id = sanitize_device_id(device_id)
+        self._event_store = event_store
         self._threshold_bytes = threshold_bytes
         self._max_backups = max_backups
         self._is_dumping = False
@@ -196,16 +198,15 @@ class DBDumpService:
                 logger.warning("Failed to remove DB dump event: %s", record.event_path)
 
     def _append_event_object(self, payload: dict[str, object]) -> None:
-        store = EventStore(self._vault_path)
         event = VaultEvent(
             event_id=str(uuid.uuid4()),
             type=EventType.DB_DUMP_CREATED,
             device_id=self._device_id,
             hlc=self._next_hlc(),
             payload={key: value for key, value in payload.items() if key != "type"},
-            parents=store.read_frontier(self._device_id),
+            parents=self._event_store.read_frontier(self._device_id),
         )
-        store.append_event(event)
+        self._event_store.append_event(event)
 
     def _next_hlc(self) -> HybridLogicalClock:
         wall_time, logical, device_id = self._clock.next()
@@ -216,9 +217,8 @@ class DBDumpService:
         )
 
     def _observe_existing_events(self) -> None:
-        store = EventStore(self._vault_path)
         latest: dict[str, object] | None = None
-        for discovered in store.discover_events():
+        for discovered in self._event_store.discover_events():
             candidate = discovered.event.hlc.to_dict()
             if latest is None or compare_hlc(candidate, latest) > 0:
                 latest = candidate
@@ -233,6 +233,7 @@ def install_db_dump_hook(
     db_path: Path,
     db_key_hex: str,
     app_data_dir: Path,
+    event_store: EventStore,
 ) -> DBDumpService:
     """Attach a post-commit hook that creates rotated DB dumps."""
     existing = getattr(session_factory, "_glyphweave_db_dump_service", None)
@@ -244,6 +245,7 @@ def install_db_dump_hook(
         db_path=db_path,
         db_key_hex=db_key_hex,
         device_id=load_device_id(app_data_dir),
+        event_store=event_store,
     )
 
     @event.listens_for(session_factory, "after_commit")

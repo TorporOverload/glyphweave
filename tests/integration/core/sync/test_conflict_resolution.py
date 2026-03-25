@@ -3,15 +3,28 @@ from sqlalchemy.orm import sessionmaker
 
 from app.infrastructure.persistence.db.base import Base
 from app.infrastructure.persistence.db.model.file_reference import FileReference
+from app.infrastructure.crypto.primitives.secure_memory import SecureMemory
 from app.infrastructure.persistence.event_store import EventStore
+from app.infrastructure.persistence.event_store_config import EventStoreConfig
 from app.core.domain.sync.event_types import EventType
 from app.core.domain.sync.models import HybridLogicalClock, VaultEvent
 from app.services.sync.replay import replay_vault_events
 
 
+def _store(vault_path) -> EventStore:
+    return EventStore(
+        EventStoreConfig(
+            vault_path=vault_path,
+            vault_id="vault-1",
+            master_key=SecureMemory(b"k" * 32),
+            encryption_enabled=True,
+        )
+    )
+
+
 def test_replay_archives_late_file_add_after_folder_delete(tmp_path) -> None:
     vault_path = tmp_path / "vault"
-    store = EventStore(vault_path)
+    store = _store(vault_path)
     events = [
         VaultEvent(
             event_id="evt-folder-create",
@@ -56,7 +69,11 @@ def test_replay_archives_late_file_add_after_folder_delete(tmp_path) -> None:
     Base.metadata.create_all(engine)
     session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
-    result = replay_vault_events(session_factory=session_factory, vault_path=vault_path)
+    result = replay_vault_events(
+        session_factory=session_factory,
+        vault_path=vault_path,
+        store=store,
+    )
 
     assert result.conflicts == 1
     with session_factory() as session:

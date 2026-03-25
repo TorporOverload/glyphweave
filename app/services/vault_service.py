@@ -2,17 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.common.config import ensure_app_data_layout
+from app.common.config import ensure_app_data_layout, get_app_data_dir
 from app.infrastructure.crypto.types import KDFParams
-from app.services.models import VaultContext
-from app.infrastructure.persistence.registry_service import APP_DATA_DIR
 from app.services.vault_files.vault_file_service import VaultFileService
+from app.services.models import VaultContext
 from app.services.runtime.vault_runtime_service import VaultRuntimeService
 
 
 class VaultService:
     def __init__(self, app_data_dir: Path | None = None):
-        base_dir = app_data_dir or APP_DATA_DIR
+        base_dir = app_data_dir or get_app_data_dir()
         ensure_app_data_layout(base_dir)
         self.context = VaultContext(app_data_dir=base_dir)
         self.runtime = VaultRuntimeService(self.context)
@@ -188,5 +187,5 @@ class VaultService:
         """Finalize all open files and release vault resources."""
         self.files.cleanup()
 
-__all__ = ["VaultService"]
 
+__all__ = ["VaultService"]

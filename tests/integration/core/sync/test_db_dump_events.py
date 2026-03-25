@@ -3,11 +3,25 @@ import json
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
+from app.core.domain.sync.event_types import EventType
+from app.infrastructure.crypto.primitives.secure_memory import SecureMemory
 from app.infrastructure.persistence.db.base import Base
 from app.infrastructure.persistence.db.model.processed_event import ProcessedEvent
 from app.infrastructure.persistence.db_dump_service import DBDumpService
-from app.core.domain.sync.event_types import EventType
+from app.infrastructure.persistence.event_store import EventStore
+from app.infrastructure.persistence.event_store_config import EventStoreConfig
 from app.services.sync.replay import replay_vault_events
+
+
+def _store(vault_path) -> EventStore:
+    return EventStore(
+        EventStoreConfig(
+            vault_path=vault_path,
+            vault_id="vault-1",
+            master_key=SecureMemory(b"k" * 32),
+            encryption_enabled=True,
+        )
+    )
 
 
 def test_db_dump_event_is_discoverable_and_replayable(monkeypatch, tmp_path) -> None:
@@ -21,12 +35,14 @@ def test_db_dump_event_is_discoverable_and_replayable(monkeypatch, tmp_path) -> 
     db_path = tmp_path / "vaults" / "vault-1" / "vault.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
     db_path.write_bytes(b"x" * 1024)
+    store = _store(vault_path)
 
     service = DBDumpService(
         vault_path=vault_path,
         db_path=db_path,
         db_key_hex="ab" * 32,
         device_id="device-a",
+        event_store=store,
     )
     monkeypatch.setattr(
         service,
@@ -41,11 +57,17 @@ def test_db_dump_event_is_discoverable_and_replayable(monkeypatch, tmp_path) -> 
     Base.metadata.create_all(engine)
     session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
-    result = replay_vault_events(session_factory=session_factory, vault_path=vault_path)
+    result = replay_vault_events(
+        session_factory=session_factory,
+        vault_path=vault_path,
+        store=store,
+    )
 
     assert result.total >= 1
     with session_factory() as session:
         processed = session.scalars(
-            select(ProcessedEvent).where(ProcessedEvent.event_type == EventType.DB_DUMP_CREATED.value)
+            select(ProcessedEvent).where(
+                ProcessedEvent.event_type == EventType.DB_DUMP_CREATED.value
+            )
         ).all()
         assert len(processed) == 1

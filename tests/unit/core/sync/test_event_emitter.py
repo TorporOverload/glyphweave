@@ -1,10 +1,12 @@
 import json
 
 import app.core.domain.sync.hlc as hlc_module
-from app.infrastructure.persistence.event_store import EventStore
 from app.core.domain.sync.event_types import EventType
-from app.services.sync.event_emitter import EventEmitter
 from app.core.domain.sync.models import HybridLogicalClock, VaultEvent
+from app.infrastructure.crypto.primitives.secure_memory import SecureMemory
+from app.infrastructure.persistence.event_store import EventStore
+from app.infrastructure.persistence.event_store_config import EventStoreConfig
+from app.services.sync.event_emitter import EventEmitter
 
 
 class _Blob:
@@ -40,6 +42,17 @@ class _FileEntry:
         self.metadata_json = None
 
 
+def _store(vault_path) -> EventStore:
+    return EventStore(
+        EventStoreConfig(
+            vault_path=vault_path,
+            vault_id="vault-1",
+            master_key=SecureMemory(b"k" * 32),
+            encryption_enabled=True,
+        )
+    )
+
+
 def test_event_emitter_writes_events_and_chains_frontier(tmp_path) -> None:
     app_data_dir = tmp_path / "app"
     app_data_dir.mkdir(parents=True, exist_ok=True)
@@ -48,7 +61,8 @@ def test_event_emitter_writes_events_and_chains_frontier(tmp_path) -> None:
         encoding="utf-8",
     )
     vault_path = tmp_path / "vault"
-    emitter = EventEmitter(vault_path=vault_path, app_data_dir=app_data_dir)
+    store = _store(vault_path)
+    emitter = EventEmitter(store=store, app_data_dir=app_data_dir)
 
     root = _Entry(name="docs", node_id="folder-1", is_folder=True)
     child = _Entry(
@@ -64,9 +78,15 @@ def test_event_emitter_writes_events_and_chains_frontier(tmp_path) -> None:
     assert folder_event.event_hash is not None
     assert file_event.event_hash is not None
     assert file_event.parents == [folder_event.event_hash]
+    payload = json.loads(
+        store.object_path(file_event.event_hash).read_text(encoding="utf-8")
+    )
+    assert payload["mode"] == "encrypted"
 
 
-def test_event_emitter_observes_existing_remote_hlc_on_startup(monkeypatch, tmp_path) -> None:
+def test_event_emitter_observes_existing_remote_hlc_on_startup(
+    monkeypatch, tmp_path
+) -> None:
     app_data_dir = tmp_path / "app"
     app_data_dir.mkdir(parents=True, exist_ok=True)
     (app_data_dir / "device.json").write_text(
@@ -74,7 +94,7 @@ def test_event_emitter_observes_existing_remote_hlc_on_startup(monkeypatch, tmp_
         encoding="utf-8",
     )
     vault_path = tmp_path / "vault"
-    store = EventStore(vault_path)
+    store = _store(vault_path)
     remote_event = VaultEvent(
         event_id="evt-remote",
         type=EventType.FOLDER_CREATE,
@@ -86,7 +106,7 @@ def test_event_emitter_observes_existing_remote_hlc_on_startup(monkeypatch, tmp_
     store.append_event(remote_event)
     monkeypatch.setattr(hlc_module.time, "time", lambda: 1.0)
 
-    emitter = EventEmitter(vault_path=vault_path, app_data_dir=app_data_dir)
+    emitter = EventEmitter(store=store, app_data_dir=app_data_dir)
     local_event = emitter.emit_folder_create(
         _Entry(name="docs", node_id="folder-1", is_folder=True)
     )
@@ -96,4 +116,3 @@ def test_event_emitter_observes_existing_remote_hlc_on_startup(monkeypatch, tmp_
         logical=6,
         device_id="device-a",
     )
-

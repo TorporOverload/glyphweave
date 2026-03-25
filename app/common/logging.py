@@ -1,37 +1,26 @@
-"""Logging configuration for GlyphWeave.
-
-Debug logging is controlled via GLYPHWEAVE_DEBUG environment variable:
-- When not set or '0', the logging is disabled by default
-- '1': Basic debug logging (INFO level)
-- '2': Detailed debug logging (DEBUG level)
-- '3': Verbose debug logging (DEBUG level + timed operations)
-"""
+"""Logging configuration for GlyphWeave."""
 
 import logging
-import os
 import sys
 from functools import wraps
 from time import perf_counter
 from typing import Any, Callable, ParamSpec, TypeVar
 
-from app.common.config import ensure_app_data_layout, get_app_data_dir
+from app.common.config import (
+    get_debug_level,
+    get_error_log_file_path,
+    get_log_file_path,
+    is_event_encryption_enabled,
+)
 
 P = ParamSpec("P")
 T = TypeVar("T")
 
-# Check environment variable once at import
-DEBUG_LEVEL = int(os.environ.get("GLYPHWEAVE_DEBUG", "0"))
+# Check configuration once at import
+DEBUG_LEVEL = get_debug_level()
 DEBUG_ENABLED = DEBUG_LEVEL > 0
-APP_DATA_DIR = ensure_app_data_layout(get_app_data_dir())
-DEFAULT_LOG_DIR = APP_DATA_DIR / "logs"
-GLYPHWEAVE_LOG_FILE = os.environ.get(
-    "GLYPHWEAVE_LOG_FILE",
-    str(DEFAULT_LOG_DIR / "debug.log"),
-)
-GLYPHWEAVE_ERROR_LOG_FILE = os.environ.get(
-    "GLYPHWEAVE_ERROR_LOG_FILE",
-    str(DEFAULT_LOG_DIR / "error.log"),
-)
+GLYPHWEAVE_LOG_FILE = get_log_file_path()
+GLYPHWEAVE_ERROR_LOG_FILE = get_error_log_file_path()
 
 
 class _SafeConsoleStream:
@@ -101,6 +90,7 @@ def setup_logging() -> logging.Logger:
         logger.addHandler(console_handler)
 
         # File handler
+        GLYPHWEAVE_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
         file_handler = logging.FileHandler(
             GLYPHWEAVE_LOG_FILE,
             encoding="utf-8",
@@ -110,6 +100,7 @@ def setup_logging() -> logging.Logger:
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
 
+        GLYPHWEAVE_ERROR_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
         error_handler = logging.FileHandler(
             GLYPHWEAVE_ERROR_LOG_FILE,
             encoding="utf-8",
@@ -123,6 +114,15 @@ def setup_logging() -> logging.Logger:
         # Production: disable all logging
         logger.setLevel(logging.CRITICAL)
         logger.addHandler(logging.NullHandler())
+
+    if not is_event_encryption_enabled():
+        warning = (
+            "WARNING: GlyphWeave event encryption is disabled via "
+            "GLYPHWEAVE_EVENT_ENCRYPTION. Event objects will be written in plaintext."
+        )
+        print(warning, file=_build_console_stream())
+        if DEBUG_ENABLED:
+            logger.warning(warning)
 
     return logger
 
@@ -158,4 +158,3 @@ def timed_operation(operation_name: str) -> Callable[[Callable[P, T]], Callable[
         return wrapper
 
     return decorator
-

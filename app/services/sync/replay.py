@@ -21,9 +21,9 @@ def replay_vault_events(
     *,
     session_factory: sessionmaker,
     vault_path: Path,
+    store: EventStore,
 ) -> BatchProcessingResult:
     """Discover, sort, and apply immutable vault events."""
-    store = EventStore(vault_path)
     processed_hashes = _load_processed_event_hashes(session_factory)
     discovered = store.discover_events(skip_hashes=processed_hashes)
     discovered = [

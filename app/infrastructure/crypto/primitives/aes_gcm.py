@@ -1,8 +1,67 @@
+import json
 import secrets
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from app.infrastructure.crypto.constants import FILE_HEADER_SIZE_BYTES, HEADER_AAD
+from app.infrastructure.crypto.constants import (
+    FILE_HEADER_SIZE_BYTES,
+    HEADER_AAD,
+    NONCE_SIZE,
+)
+from app.infrastructure.crypto.primitives.key_derivation import derive_subkey
+from app.infrastructure.crypto.types import KeyMaterial, KeyPurpose
+
+
+def build_event_aad(*, event_hash: str, version: int, device_id: str) -> bytes:
+    return json.dumps(
+        {
+            "device_id": device_id,
+            "event_hash": event_hash,
+            "version": version,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+
+
+def encrypt_event_bytes(
+    *,
+    plaintext: bytes,
+    event_hash: str,
+    device_id: str,
+    master_key: KeyMaterial,
+    vault_id: bytes,
+    version: int,
+) -> tuple[bytes, bytes]:
+    key = derive_subkey(master_key, vault_id, KeyPurpose.EVENT, event_hash)
+    nonce = secrets.token_bytes(NONCE_SIZE)
+    aad = build_event_aad(
+        event_hash=event_hash,
+        version=version,
+        device_id=device_id,
+    )
+    ciphertext = AESGCM(key).encrypt(nonce, plaintext, aad)
+    return nonce, ciphertext
+
+
+def decrypt_event_bytes(
+    *,
+    nonce: bytes,
+    ciphertext: bytes,
+    event_hash: str,
+    device_id: str,
+    master_key: KeyMaterial,
+    vault_id: bytes,
+    version: int,
+) -> bytes:
+    key = derive_subkey(master_key, vault_id, KeyPurpose.EVENT, event_hash)
+    aad = build_event_aad(
+        event_hash=event_hash,
+        version=version,
+        device_id=device_id,
+    )
+    return AESGCM(key).decrypt(nonce, ciphertext, aad)
 
 
 class AESGCMCipher:
@@ -52,7 +111,7 @@ class AESGCMCipher:
         # Generate nonce: 8 random bytes + 4 bytes chunk index = 12 bytes total
         nonce = secrets.token_bytes(8) + chunk_index.to_bytes(4, "big")
 
-        # Include chunk index and last-chunk flag in AAD 
+        # Include chunk index and last-chunk flag in AAD
         # to prevent reordering/truncation
         aad = (
             file_id.encode("utf-8")
@@ -93,4 +152,3 @@ class AESGCMCipher:
 
         plaintext = self.cipher.decrypt(nonce, ciphertext, aad)
         return plaintext
-

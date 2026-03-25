@@ -22,12 +22,14 @@ from pathlib import Path
 
 from mfusepy import FUSE
 
-from app.common.config import get_vaults_data_dir
+from app.common.config import get_vaults_data_dir, is_event_encryption_enabled
 from app.infrastructure.crypto.primitives.secure_memory import SecureMemory
 from app.infrastructure.crypto.service.key_service import KeyService
 from app.infrastructure.crypto.service.utils import load_vault_key
 from app.infrastructure.persistence.db.base import DbBase
 from app.infrastructure.persistence.db.service.file_service import FileService
+from app.infrastructure.persistence.event_store import EventStore
+from app.infrastructure.persistence.event_store_config import EventStoreConfig
 from app.common.paths.runtime_layout import runtime_cache_dir
 from app.infrastructure.fuse.single_fs import SingleFileFS
 from app.infrastructure.persistence.db_dump_service import install_db_dump_hook
@@ -102,6 +104,14 @@ def main() -> int:
     key_service = KeyService()
     key_service.vault_key_file = load_vault_key(vault_key_path(vault_path))
     key_service.master_key = SecureMemory.consume_mutable(master_key_bytes)
+    event_store = EventStore(
+        EventStoreConfig(
+            vault_path=vault_path,
+            vault_id=args.vault_id,
+            master_key=key_service.master_key,
+            encryption_enabled=is_event_encryption_enabled(),
+        )
+    )
 
     # Now safe to proceed with DB operations; master key is locked in memory
     db = DbBase(args.vault_id, db_key_hex, vaults_data_dir=vaults_data_dir)
@@ -112,6 +122,7 @@ def main() -> int:
         db_path=db.db_path,
         db_key_hex=db_key_hex,
         app_data_dir=vaults_data_dir.parent,
+        event_store=event_store,
     )
     file_service = FileService(session_factory)
 
@@ -157,4 +168,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

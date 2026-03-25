@@ -17,6 +17,7 @@ from app.infrastructure.persistence.db_dump_service import (
 )
 from app.services.content.extraction_service import ExtractionService
 from app.services.content.indexing_service import IndexingService
+from app.services.runtime.event_store_factory import build_event_store
 from app.services.sync.replay import replay_vault_events
 from app.services.sync.runtime import EventReplayRuntime
 
@@ -53,9 +54,11 @@ def bootstrap_runtime_services(context: VaultContext) -> None:
     context.encryption_service = EncryptionService()
     context.session_factory = context.db.SessionLocal
     bootstrap_file_reference_node_ids(context.session_factory)
+    context.event_store = build_event_store(context)
     replay_vault_events(
         session_factory=context.session_factory,
         vault_path=vault_path,
+        store=context.event_store,
     )
     dump_service = install_db_dump_hook(
         session_factory=context.session_factory,
@@ -63,6 +66,7 @@ def bootstrap_runtime_services(context: VaultContext) -> None:
         db_path=context.db.db_path,
         db_key_hex=context.db_key_hex,
         app_data_dir=context.app_data_dir,
+        event_store=context.event_store,
     )
     dump_service.maybe_create_dump()
     context.file_service = FileService(context.session_factory)
@@ -71,6 +75,7 @@ def bootstrap_runtime_services(context: VaultContext) -> None:
     if context.event_replay_runtime is None:
         context.event_replay_runtime = EventReplayRuntime(
             context=context,
+            store=context.event_store,
             on_replayed=_index_replayed_entries,
         )
     context.event_replay_runtime.start()

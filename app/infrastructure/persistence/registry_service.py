@@ -11,17 +11,15 @@ from app.common.config import (
 )
 from app.common.paths.vault_layout import metadata_path
 
-APP_DATA_DIR = get_app_data_dir()
-
 
 def _registry_path(app_data_dir: Path | None = None) -> Path:
-    root = Path(app_data_dir or APP_DATA_DIR)
+    root = Path(app_data_dir or get_app_data_dir())
     return root / VAULTS_REGISTRY_FILE
 
 
 def load_registry(app_data_dir: Path | None = None) -> list[dict]:
     """Load and return all vault registry entries from disk."""
-    root = Path(app_data_dir or APP_DATA_DIR)
+    root = Path(app_data_dir or get_app_data_dir())
     registry_path = _registry_path(root)
     ensure_app_data_layout(root)
     if not registry_path.exists():
@@ -32,7 +30,7 @@ def load_registry(app_data_dir: Path | None = None) -> list[dict]:
 
 def save_registry(entries: list[dict], app_data_dir: Path | None = None) -> None:
     """Persist the given vault registry entries to disk."""
-    root = Path(app_data_dir or APP_DATA_DIR)
+    root = Path(app_data_dir or get_app_data_dir())
     ensure_app_data_layout(root)
     with open(_registry_path(root), "w", encoding="utf-8") as f:
         json.dump(entries, f, indent=4)
@@ -87,4 +85,3 @@ def read_vault_metadata(vault_dir: Path) -> dict:
         raise FileNotFoundError(f".glyphweave_vault not found in {vault_dir}")
     with open(meta_path, "r", encoding="utf-8") as f:
         return json.load(f)
-

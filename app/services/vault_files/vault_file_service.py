@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.common.paths.runtime_layout import runtime_cache_dir
 from app.services.content.indexing_service import IndexingService
 from app.services.models import PendingFallbackOpen, VaultContext
+from app.services.runtime.event_store_factory import build_event_store
 from app.services.sync.event_emitter import EventEmitter
 
 from . import access, commands, queries
@@ -38,10 +39,14 @@ class VaultFileService:
     def _build_event_emitter(self) -> EventEmitter | None:
         if self.context.event_emitter is not None:
             return self.context.event_emitter
-        if self.context.vault_path is None:
+        if (
+            self.context.vault_path is None
+            or self.context.vault_id is None
+            or self.context.master_key is None
+        ):
             return None
         self.context.event_emitter = EventEmitter(
-            vault_path=self.context.vault_path,
+            store=build_event_store(self.context),
             app_data_dir=self.context.app_data_dir,
         )
         return self.context.event_emitter

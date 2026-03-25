@@ -6,6 +6,7 @@ from pathlib import Path
 
 import sqlcipher3
 
+from app.infrastructure.crypto.primitives.secure_memory import SecureMemory
 from app.infrastructure.persistence.db_dump_service import (
     DB_DUMP_THRESHOLD_BYTES,
     DBDumpService,
@@ -13,10 +14,24 @@ from app.infrastructure.persistence.db_dump_service import (
     restore_latest_db_dump,
 )
 from app.infrastructure.persistence.event_store import EventStore
+from app.infrastructure.persistence.event_store_config import EventStoreConfig
 from app.core.domain.sync.event_types import EventType
 
 
-def test_load_device_id_generates_and_persists_uuid_when_missing(tmp_path: Path) -> None:
+def _store(vault_path: Path) -> EventStore:
+    return EventStore(
+        EventStoreConfig(
+            vault_path=vault_path,
+            vault_id="vault-1",
+            master_key=SecureMemory(b"k" * 32),
+            encryption_enabled=True,
+        )
+    )
+
+
+def test_load_device_id_generates_and_persists_uuid_when_missing(
+    tmp_path: Path,
+) -> None:
     device_id = load_device_id(tmp_path)
 
     assert uuid.UUID(device_id).version == 4
@@ -25,17 +40,21 @@ def test_load_device_id_generates_and_persists_uuid_when_missing(tmp_path: Path)
     assert payload["status"] == "active"
 
 
-def test_db_dump_service_creates_initial_dump_with_event(monkeypatch, tmp_path: Path) -> None:
+def test_db_dump_service_creates_initial_dump_with_event(
+    monkeypatch, tmp_path: Path
+) -> None:
     vault_path = tmp_path / "vault"
     db_path = tmp_path / "vaults" / "vault-1" / "vault.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
     db_path.write_bytes(b"x" * 1024)
+    store = _store(vault_path)
 
     service = DBDumpService(
         vault_path=vault_path,
         db_path=db_path,
         db_key_hex="ab" * 32,
         device_id="device:1",
+        event_store=store,
     )
 
     monkeypatch.setattr(
@@ -55,23 +74,27 @@ def test_db_dump_service_creates_initial_dump_with_event(monkeypatch, tmp_path: 
     assert payload["type"] == "db_dump_created"
     assert payload["dump_name"] == dump_path.name
     assert payload["db_size_bytes"] == 1024
-    discovered = EventStore(vault_path).discover_events()
+    discovered = store.discover_events()
     assert len(discovered) == 1
     assert discovered[0].event.type == EventType.DB_DUMP_CREATED
     assert discovered[0].event.payload["dump_name"] == dump_path.name
 
 
-def test_db_dump_service_skips_until_threshold_crossed(monkeypatch, tmp_path: Path) -> None:
+def test_db_dump_service_skips_until_threshold_crossed(
+    monkeypatch, tmp_path: Path
+) -> None:
     vault_path = tmp_path / "vault"
     db_path = tmp_path / "vaults" / "vault-1" / "vault.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
     db_path.write_bytes(b"x" * 1024)
+    store = _store(vault_path)
 
     service = DBDumpService(
         vault_path=vault_path,
         db_path=db_path,
         db_key_hex="ab" * 32,
         device_id="device-1",
+        event_store=store,
     )
 
     monkeypatch.setattr(
@@ -99,12 +122,14 @@ def test_db_dump_service_keeps_only_three_latest_versions(
     db_path = tmp_path / "vaults" / "vault-1" / "vault.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
     db_path.write_bytes(b"x" * 1024)
+    store = _store(vault_path)
 
     service = DBDumpService(
         vault_path=vault_path,
         db_path=db_path,
         db_key_hex="ab" * 32,
         device_id="device-1",
+        event_store=store,
         threshold_bytes=1,
         max_backups=3,
     )
@@ -186,11 +211,21 @@ def test_restore_latest_db_dump_uses_newest_manifest(tmp_path: Path) -> None:
     _write_dump(older_dump, "older")
     _write_dump(newer_dump, "newer")
     (events_dir / f"{older_dump.name}.json").write_text(
-        json.dumps({"created_at": "20260322T000001Z", "db_size_bytes": older_dump.stat().st_size}),
+        json.dumps(
+            {
+                "created_at": "20260322T000001Z",
+                "db_size_bytes": older_dump.stat().st_size,
+            }
+        ),
         encoding="utf-8",
     )
     (events_dir / f"{newer_dump.name}.json").write_text(
-        json.dumps({"created_at": "20260322T000002Z", "db_size_bytes": newer_dump.stat().st_size}),
+        json.dumps(
+            {
+                "created_at": "20260322T000002Z",
+                "db_size_bytes": newer_dump.stat().st_size,
+            }
+        ),
         encoding="utf-8",
     )
 

@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from app.infrastructure.persistence.db.base import DbBase
     from app.infrastructure.persistence.db.service.file_service import FileService
     from app.infrastructure.persistence.db.service.folder_service import FolderService
+    from app.infrastructure.persistence.event_store import EventStore
     from app.infrastructure.fuse.fuse_orchestrator import FuseOrchestrator
     from app.services.sync.event_emitter import EventEmitter
     from app.services.sync.runtime import EventReplayRuntime
@@ -90,6 +91,7 @@ class VaultContext:
     folder_service: FolderService | None = None
     mounts: FuseOrchestrator | None = None
     master_key: SecureMemory | None = None
+    event_store: EventStore | None = None
     event_emitter: EventEmitter | None = None
     event_replay_runtime: EventReplayRuntime | None = None
 
@@ -110,4 +112,3 @@ class VaultContext:
         if self.master_key is None:
             raise RuntimeError("Master key is not available")
         return self.master_key
-

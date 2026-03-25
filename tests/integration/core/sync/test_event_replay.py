@@ -3,8 +3,12 @@ import json
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
+from app.core.domain.sync.event_types import EventType
+from app.infrastructure.crypto.primitives.secure_memory import SecureMemory
 from app.infrastructure.persistence.db.base import Base
 from app.infrastructure.persistence.db.model.file_reference import FileReference
+from app.infrastructure.persistence.event_store import EventStore
+from app.infrastructure.persistence.event_store_config import EventStoreConfig
 from app.services.sync.event_emitter import EventEmitter
 from app.services.sync.replay import replay_vault_events
 
@@ -26,12 +30,31 @@ class _FileEntry:
 
 
 class _Ref:
-    def __init__(self, *, name: str, node_id: str, parent=None, file_entry=None, is_folder=False) -> None:
+    def __init__(
+        self,
+        *,
+        name: str,
+        node_id: str,
+        parent=None,
+        file_entry=None,
+        is_folder=False,
+    ) -> None:
         self.name = name
         self.node_id = node_id
         self.parent = parent
         self.file_entry = file_entry
         self.is_folder = is_folder
+
+
+def _store(vault_path) -> EventStore:
+    return EventStore(
+        EventStoreConfig(
+            vault_path=vault_path,
+            vault_id="vault-1",
+            master_key=SecureMemory(b"k" * 32),
+            encryption_enabled=True,
+        )
+    )
 
 
 def test_replay_round_trip_from_emitted_events(tmp_path) -> None:
@@ -42,7 +65,8 @@ def test_replay_round_trip_from_emitted_events(tmp_path) -> None:
         encoding="utf-8",
     )
     vault_path = tmp_path / "vault"
-    emitter = EventEmitter(vault_path=vault_path, app_data_dir=app_data_dir)
+    store = _store(vault_path)
+    emitter = EventEmitter(store=store, app_data_dir=app_data_dir)
 
     folder = _Ref(name="docs", node_id="folder-1", is_folder=True)
     file_ref = _Ref(
@@ -58,7 +82,11 @@ def test_replay_round_trip_from_emitted_events(tmp_path) -> None:
     Base.metadata.create_all(engine)
     session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
-    result = replay_vault_events(session_factory=session_factory, vault_path=vault_path)
+    result = replay_vault_events(
+        session_factory=session_factory,
+        vault_path=vault_path,
+        store=store,
+    )
 
     assert result.total == 2
     assert result.failed == 0
