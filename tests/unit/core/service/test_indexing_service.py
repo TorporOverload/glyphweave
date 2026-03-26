@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy.orm.exc import DetachedInstanceError
 
 from app.infrastructure.persistence.db.model.extraction_status import ExtractionStatus
+from app.services.content.extraction_service import ExtractionService
 from app.services.content.extraction_service import ExtractionResult
 from app.services.content.indexing_service import IndexingService
 
@@ -160,6 +161,63 @@ def test_index_source_file_marks_unsupported_with_metadata(
     assert metadata["text_extraction_supported"] is False
 
 
+def test_index_source_file_marks_invalid_pdf_parse_as_unsupported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, _ = _make_service(tmp_path)
+    source = tmp_path / "broken.pdf"
+    source.write_bytes(b"%PDF-1.4\n")
+    statuses: list[tuple] = []
+
+    monkeypatch.setattr(
+        service,
+        "_set_status",
+        lambda file_entry_id, status, preview=None, metadata_json=None: statuses.append(
+            (file_entry_id, status, preview, metadata_json)
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.content.indexing_service.ExtractionService.extract",
+        lambda path: ExtractionResult(
+            error=(
+                "ParsingError: Invalid PDF: PdfiumLibraryInternalError: "
+                "FormatError: Invalid PDF: PdfiumLibraryInternalError: FormatError"
+            ),
+            unsupported=True,
+            metadata={"kind": "pdf"},
+        ),
+    )
+
+    result = service.index_source_file(7, source, "broken.pdf")
+
+    assert result is False
+    assert statuses[0][0:3] == (7, ExtractionStatus.UNSUPPORTED, "")
+
+
+def test_extraction_service_marks_invalid_pdf_parse_as_unsupported(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "broken.pdf"
+    source.write_bytes(b"%PDF-1.4\n")
+
+    def _raise(_path: Path):
+        raise RuntimeError(
+            "ParsingError: Invalid PDF: PdfiumLibraryInternalError: "
+            "FormatError: Invalid PDF: PdfiumLibraryInternalError: FormatError"
+        )
+
+    monkeypatch.setattr(
+        "app.services.content.extraction_service._run_kreuzberg_extraction",
+        _raise,
+    )
+
+    result = ExtractionService.extract(source)
+
+    assert result.error is not None
+    assert result.unsupported is True
+
+
 def test_index_file_entry_skips_when_no_blobs(tmp_path: Path) -> None:
     service, encryption_service = _make_service(tmp_path)
     entry = _make_entry(blob_ids=[])
@@ -222,7 +280,9 @@ def test_index_file_entry_reloades_detached_entry_blobs(
 ) -> None:
     service, encryption_service = _make_service(tmp_path)
     entry = _DetachedEntry(entry_id=7, file_id="detached-file")
-    loaded_entry = _make_entry(file_id="loaded-file", entry_id=7, blob_ids=["blob-9.enc"])
+    loaded_entry = _make_entry(
+        file_id="loaded-file", entry_id=7, blob_ids=["blob-9.enc"]
+    )
     lookup_session = _FakeLookupSession(loaded_entry)
     write_session = SimpleNamespace()
     temp_path = tmp_path / "cache" / ".tmp" / "temp.txt"
@@ -374,7 +434,9 @@ def test_index_file_entry_marks_done_for_empty_content(
     monkeypatch.setattr(service, "_decrypt_to_temp", lambda *args: temp_path)
     monkeypatch.setattr(
         "app.services.content.indexing_service.ExtractionService.extract",
-        lambda path: ExtractionResult(content="   ", preview="", metadata={"empty": True}),
+        lambda path: ExtractionResult(
+            content="   ", preview="", metadata={"empty": True}
+        ),
     )
     monkeypatch.setattr(
         service,

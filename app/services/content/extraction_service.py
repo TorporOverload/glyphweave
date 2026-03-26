@@ -29,6 +29,7 @@ class ExtractionResult:
     preview: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
+    unsupported: bool = False
 
 
 def _run_kreuzberg_extraction(file_path: Path) -> tuple[str, dict[str, Any]]:
@@ -38,6 +39,16 @@ def _run_kreuzberg_extraction(file_path: Path) -> tuple[str, dict[str, Any]]:
     content = result.content or ""
     metadata = result.metadata or {}
     return content, metadata
+
+
+def _is_unsupported_pdf_parse_error(file_path: Path, error_text: str) -> bool:
+    if file_path.suffix.lower() != ".pdf":
+        return False
+    normalized = error_text.lower()
+    return (
+        "invalid pdf" in normalized
+        or "pdfiumlibraryinternalerror: formaterror" in normalized
+    )
 
 
 class ExtractionService:
@@ -69,5 +80,8 @@ class ExtractionService:
             )
         except Exception as exc:
             logger.warning(f"Text extraction failed for {path.name}: {exc}")
-            return ExtractionResult(error=str(exc))
-
+            error_text = str(exc)
+            return ExtractionResult(
+                error=error_text,
+                unsupported=_is_unsupported_pdf_parse_error(path, error_text),
+            )

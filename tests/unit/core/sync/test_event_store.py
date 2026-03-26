@@ -131,6 +131,26 @@ def test_load_event_supports_legacy_plaintext_objects(tmp_path) -> None:
     assert loaded.payload == stored.payload
 
 
+def test_iter_frontier_hashes_returns_known_head_hashes(tmp_path) -> None:
+    store = _store(tmp_path / "vault")
+    first = store.append_event(_event("evt-1"))
+    second = store.append_event(
+        VaultEvent(
+            event_id="evt-2",
+            type=EventType.FILE_ADD,
+            device_id="device-b",
+            hlc=HybridLogicalClock(wall_time=1001, logical=0, device_id="device-b"),
+            payload=first.payload,
+            parents=[],
+        )
+    )
+
+    assert store.iter_frontier_hashes() == {
+        first.event_hash,
+        second.event_hash,
+    }
+
+
 def test_load_event_raises_when_encrypted_object_is_tampered(tmp_path) -> None:
     store = _store(tmp_path / "vault")
     stored = store.append_event(_event())

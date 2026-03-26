@@ -127,16 +127,11 @@ class EventReplayRuntime:
             self._condition.notify_all()
 
     def run(self) -> None:
-        self._schedule_existing_objects()
         while True:
             scheduled = self._next_due()
             if scheduled is None:
                 return
             self._process_event_hash(scheduled.event_hash)
-
-    def _schedule_existing_objects(self) -> None:
-        for path in self._store.objects_dir.glob("*.json"):
-            self.schedule(path.stem, INITIAL_REPLAY_DELAY_SECONDS)
 
     def _next_due(self) -> _ScheduledReplay | None:
         while True:
@@ -184,6 +179,7 @@ class EventReplayRuntime:
                 session_factory=self._context.session_factory,
                 vault_path=self._context.require_vault_path(),
                 store=self._store,
+                local_data_path=self._context.local_data_path,
             )
             if result.total > 0:
                 self._on_replayed(self._context)

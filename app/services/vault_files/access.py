@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.infrastructure.persistence.db_dump_service import flush_db_dump_hook
 from app.infrastructure.platform.launcher import open_with_default_app
 from app.services.models import UnlockedFileInfo
 
@@ -65,3 +66,6 @@ def cleanup(service) -> None:
         folder_service=service._require_folder_service(),
         encryption_service=service._require_encryption_service(),
     )
+    session_factory = service.context.session_factory
+    if session_factory is not None:
+        flush_db_dump_hook(session_factory)

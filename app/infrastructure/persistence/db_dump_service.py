@@ -5,6 +5,8 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Lock, Timer
+from typing import Callable
 
 import sqlcipher3
 from sqlalchemy import event
@@ -19,6 +21,7 @@ from app.common.logging import logger
 
 DB_DUMP_THRESHOLD_BYTES = 5 * 1024 * 1024
 DB_DUMP_MAX_BACKUPS = 3
+DB_DUMP_CHECK_DELAY_SECONDS = 5.0
 DB_DUMP_EVENT_TYPE = EventType.DB_DUMP_CREATED
 
 
@@ -102,6 +105,8 @@ class DBDumpService:
         event_store: EventStore,
         threshold_bytes: int = DB_DUMP_THRESHOLD_BYTES,
         max_backups: int = DB_DUMP_MAX_BACKUPS,
+        check_delay_seconds: float = DB_DUMP_CHECK_DELAY_SECONDS,
+        timer_factory: Callable[[float, Callable[[], None]], Timer] | None = None,
     ) -> None:
         self._vault_path = Path(vault_path)
         self._db_path = Path(db_path)
@@ -110,7 +115,12 @@ class DBDumpService:
         self._event_store = event_store
         self._threshold_bytes = threshold_bytes
         self._max_backups = max_backups
+        self._check_delay_seconds = check_delay_seconds
+        self._timer_factory = timer_factory or Timer
         self._is_dumping = False
+        self._schedule_lock = Lock()
+        self._scheduled_check: Timer | None = None
+        self._scheduled_generation = 0
         self._clock = HLCClock(device_id=self._device_id)
         self._observe_existing_events()
 
@@ -164,6 +174,48 @@ class DBDumpService:
             return dump_path
         finally:
             self._is_dumping = False
+
+    def schedule_dump_check(self) -> None:
+        """Debounce DB dump checks so commit bursts trigger a single size check."""
+        with self._schedule_lock:
+            self._scheduled_generation += 1
+            generation = self._scheduled_generation
+
+            if self._scheduled_check is not None:
+                self._scheduled_check.cancel()
+
+            def _run() -> None:
+                self._run_scheduled_dump_check(generation)
+
+            timer = self._timer_factory(self._check_delay_seconds, _run)
+            self._scheduled_check = timer
+            timer.start()
+
+    def flush_pending_dump_check(self) -> None:
+        """Synchronously run any scheduled dump check before shutdown."""
+        with self._schedule_lock:
+            timer = self._scheduled_check
+            if timer is None:
+                return
+            timer.cancel()
+            self._scheduled_check = None
+            self._scheduled_generation += 1
+
+        try:
+            self.maybe_create_dump()
+        except Exception:
+            logger.exception("Failed to create DB dump while flushing pending check")
+
+    def _run_scheduled_dump_check(self, generation: int) -> None:
+        with self._schedule_lock:
+            if generation != self._scheduled_generation:
+                return
+            self._scheduled_check = None
+
+        try:
+            self.maybe_create_dump()
+        except Exception:
+            logger.exception("Failed to create DB dump after scheduled commit burst")
 
     def _backup_database_online(self, destination: Path) -> None:
         """Create a consistent encrypted copy using SQLite's online backup API."""
@@ -235,7 +287,7 @@ def install_db_dump_hook(
     app_data_dir: Path,
     event_store: EventStore,
 ) -> DBDumpService:
-    """Attach a post-commit hook that creates rotated DB dumps."""
+    """Attach a post-commit hook that debounces rotated DB dump checks."""
     existing = getattr(session_factory, "_glyphweave_db_dump_service", None)
     if existing is not None:
         return existing
@@ -250,10 +302,14 @@ def install_db_dump_hook(
 
     @event.listens_for(session_factory, "after_commit")
     def _after_commit(_session) -> None:
-        try:
-            service.maybe_create_dump()
-        except Exception:
-            logger.exception("Failed to create DB dump after commit")
+        service.schedule_dump_check()
 
     session_factory._glyphweave_db_dump_service = service
     return service
+
+
+def flush_db_dump_hook(session_factory) -> None:
+    """Flush any pending DB dump check attached to a session factory."""
+    service = getattr(session_factory, "_glyphweave_db_dump_service", None)
+    if service is not None:
+        service.flush_pending_dump_check()

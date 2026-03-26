@@ -145,13 +145,16 @@ class IndexingService:
         merged_metadata.update(result.metadata or {})
         metadata_json = json.dumps(merged_metadata) if merged_metadata else None
         if result.error is not None:
+            unsupported = bool(getattr(result, "unsupported", False))
             logger.warning(
                 f"Indexing extraction failed: entry_id={file_entry_id}, "
                 f"filename={filename}, error={result.error}"
             )
             self._set_status(
                 file_entry_id,
-                ExtractionStatus.FAILED,
+                ExtractionStatus.UNSUPPORTED
+                if unsupported
+                else ExtractionStatus.FAILED,
                 preview="",
                 metadata_json=metadata_json,
             )
@@ -288,4 +291,3 @@ class IndexingService:
             logger.debug(f"Removed plaintext staging file: {temp_path}")
         except OSError as exc:
             logger.warning(f"Failed to clean plaintext temp file {temp_path}: {exc}")
-

@@ -8,6 +8,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     event,
@@ -28,13 +29,12 @@ class FileReference(Base):
     """Represents a node in the virtual file tree (file or folder)."""
 
     __tablename__ = "file_reference"
+    __table_args__ = (Index("ix_file_reference_node_id", "node_id", unique=True),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     node_id: Mapped[str] = mapped_column(
         String,
         nullable=False,
-        unique=True,
-        index=True,
         default=lambda: str(uuid.uuid4()),
     )
     parent_id: Mapped[Optional[int]] = mapped_column(
@@ -124,4 +124,3 @@ def propagate_path_to_children(mapper, connection, target: FileReference) -> Non
         )
 
         connection.execute(stmt)
-

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from app.common.device_id import load_device_id
+from app.common.logging import logger
 from app.infrastructure.persistence.event_store import EventStore
 from app.core.domain.sync.event_types import EventType
 from app.core.domain.sync.hlc import HLCClock, compare_hlc
@@ -143,8 +144,15 @@ class EventEmitter:
 
     def _observe_existing_events(self) -> None:
         latest: dict[str, object] | None = None
-        for discovered in self._store.discover_events():
-            candidate = discovered.event.hlc.to_dict()
+        for event_hash in self._store.iter_frontier_hashes():
+            try:
+                event = self._store.load_event(event_hash)
+            except FileNotFoundError:
+                continue
+            except Exception:
+                logger.exception("Failed to read frontier head event %s", event_hash)
+                continue
+            candidate = event.hlc.to_dict()
             if latest is None or compare_hlc(candidate, latest) > 0:
                 latest = candidate
         if latest is not None:

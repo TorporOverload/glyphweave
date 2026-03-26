@@ -6,9 +6,6 @@ from app.infrastructure.persistence.db.service.search import get_retriable_extra
 from app.infrastructure.persistence.db.service.file_service import FileService
 from app.infrastructure.persistence.db.service.folder_service import FolderService
 from app.infrastructure.persistence.db.service.session import session_scope
-from app.infrastructure.persistence.db.service.sync_bootstrap import (
-    bootstrap_file_reference_node_ids,
-)
 from app.infrastructure.fuse.fuse_orchestrator import FuseOrchestrator
 from app.common.paths.runtime_layout import runtime_cache_dir
 from app.infrastructure.persistence.db_dump_service import (
@@ -53,12 +50,12 @@ def bootstrap_runtime_services(context: VaultContext) -> None:
     )
     context.encryption_service = EncryptionService()
     context.session_factory = context.db.SessionLocal
-    bootstrap_file_reference_node_ids(context.session_factory)
     context.event_store = build_event_store(context)
     replay_vault_events(
         session_factory=context.session_factory,
         vault_path=vault_path,
         store=context.event_store,
+        local_data_path=local_data_path,
     )
     dump_service = install_db_dump_hook(
         session_factory=context.session_factory,

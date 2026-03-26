@@ -1,6 +1,9 @@
+import json
+
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
+from app.common.paths.runtime_layout import replay_checkpoint_path
 from app.core.domain.sync.event_types import EventType
 from app.core.domain.sync.models import HybridLogicalClock, VaultEvent
 from app.infrastructure.crypto.primitives.secure_memory import SecureMemory
@@ -167,3 +170,54 @@ def test_replay_vault_events_only_applies_new_events(tmp_path) -> None:
             "/docs/notes.txt",
             "/docs/report.txt",
         ]
+
+
+def test_replay_vault_events_skips_full_scan_when_checkpoint_matches(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    vault_path = tmp_path / "vault"
+    local_data_path = tmp_path / "local"
+    local_data_path.mkdir(parents=True, exist_ok=True)
+    store = _store(vault_path)
+    event = VaultEvent(
+        event_id="evt-folder",
+        type=EventType.FOLDER_CREATE,
+        device_id="device-a",
+        hlc=HybridLogicalClock(wall_time=1000, logical=0, device_id="device-a"),
+        payload={"node_id": "folder-1", "parent_node_id": None, "name": "docs"},
+        parents=[],
+    )
+    stored = store.append_event(event)
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'replay_checkpoint.db'}")
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    replay_vault_events(
+        session_factory=session_factory,
+        vault_path=vault_path,
+        store=store,
+        local_data_path=local_data_path,
+    )
+    replay_checkpoint_path(local_data_path).write_text(
+        json.dumps({"frontier": [stored.event_hash]}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        store,
+        "discover_events",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("unexpected scan")
+        ),
+    )
+
+    result = replay_vault_events(
+        session_factory=session_factory,
+        vault_path=vault_path,
+        store=store,
+        local_data_path=local_data_path,
+    )
+
+    assert result.total == 0
+    assert result.failed == 0

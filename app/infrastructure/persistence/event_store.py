@@ -127,6 +127,18 @@ class EventStore:
         payload = json.loads(path.read_text(encoding="utf-8"))
         return [str(item) for item in payload.get("frontier", [])]
 
+    def iter_frontier_hashes(self) -> set[str]:
+        hashes: set[str] = set()
+        for path in self.roots_dir.glob("*.json"):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            for item in payload.get("frontier", []):
+                if item:
+                    hashes.add(str(item))
+        return hashes
+
     def write_frontier(self, device_id: str, frontier: list[str]) -> None:
         path = self.root_path(device_id)
         path.parent.mkdir(parents=True, exist_ok=True)

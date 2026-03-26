@@ -3,13 +3,20 @@ from __future__ import annotations
 import json
 import uuid
 from pathlib import Path
+from threading import Timer
+from typing import Callable
 
 import sqlcipher3
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from app.infrastructure.crypto.primitives.secure_memory import SecureMemory
 from app.infrastructure.persistence.db_dump_service import (
+    DB_DUMP_CHECK_DELAY_SECONDS,
     DB_DUMP_THRESHOLD_BYTES,
     DBDumpService,
+    flush_db_dump_hook,
+    install_db_dump_hook,
     load_device_id,
     restore_latest_db_dump,
 )
@@ -244,3 +251,154 @@ def test_restore_latest_db_dump_uses_newest_manifest(tmp_path: Path) -> None:
     finally:
         restored.close()
     assert row == ("newer",)
+
+
+def test_schedule_dump_check_resets_timer(monkeypatch, tmp_path: Path) -> None:
+    vault_path = tmp_path / "vault"
+    db_path = tmp_path / "vaults" / "vault-1" / "vault.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    db_path.write_bytes(b"x" * 1024)
+    store = _store(vault_path)
+    fired: list[int] = []
+    created_timers: list[_FakeTimer] = []
+
+    class _FakeTimer(Timer):
+        def __init__(self, delay: float, callback: Callable[[], None]) -> None:
+            super().__init__(delay, callback)
+            self.delay = delay
+            self.callback = callback
+            self.started = False
+            self.cancelled = False
+            created_timers.append(self)
+
+        def start(self) -> None:
+            self.started = True
+
+        def cancel(self) -> None:
+            self.cancelled = True
+
+    service = DBDumpService(
+        vault_path=vault_path,
+        db_path=db_path,
+        db_key_hex="ab" * 32,
+        device_id="device-1",
+        event_store=store,
+        timer_factory=_FakeTimer,
+    )
+    monkeypatch.setattr(service, "maybe_create_dump", lambda: fired.append(1) or None)
+
+    service.schedule_dump_check()
+    service.schedule_dump_check()
+
+    assert len(created_timers) == 2
+    assert created_timers[0].delay == DB_DUMP_CHECK_DELAY_SECONDS
+    assert created_timers[0].started is True
+    assert created_timers[0].cancelled is True
+    assert created_timers[1].started is True
+
+    created_timers[0].callback()
+    assert fired == []
+
+    created_timers[1].callback()
+    assert fired == [1]
+
+
+def test_flush_pending_dump_check_runs_scheduled_dump_synchronously(
+    monkeypatch, tmp_path: Path
+) -> None:
+    vault_path = tmp_path / "vault"
+    db_path = tmp_path / "vaults" / "vault-1" / "vault.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    db_path.write_bytes(b"x" * 1024)
+    store = _store(vault_path)
+    fired: list[int] = []
+    created_timers: list[_FakeTimer] = []
+
+    class _FakeTimer(Timer):
+        def __init__(self, delay: float, callback: Callable[[], None]) -> None:
+            super().__init__(delay, callback)
+            self.delay = delay
+            self.callback = callback
+            self.started = False
+            self.cancelled = False
+            created_timers.append(self)
+
+        def start(self) -> None:
+            self.started = True
+
+        def cancel(self) -> None:
+            self.cancelled = True
+
+    service = DBDumpService(
+        vault_path=vault_path,
+        db_path=db_path,
+        db_key_hex="ab" * 32,
+        device_id="device-1",
+        event_store=store,
+        timer_factory=_FakeTimer,
+    )
+    monkeypatch.setattr(service, "maybe_create_dump", lambda: fired.append(1) or None)
+
+    service.schedule_dump_check()
+    service.flush_pending_dump_check()
+
+    assert len(created_timers) == 1
+    assert created_timers[0].started is True
+    assert created_timers[0].cancelled is True
+    assert fired == [1]
+
+    created_timers[0].callback()
+    assert fired == [1]
+
+
+def test_flush_db_dump_hook_flushes_attached_service(tmp_path: Path) -> None:
+    vault_path = tmp_path / "vault"
+    app_data_dir = tmp_path / "app"
+    app_data_dir.mkdir(parents=True, exist_ok=True)
+    db_path = tmp_path / "vaults" / "vault-1" / "vault.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    db_path.write_bytes(b"x" * 1024)
+    store = _store(vault_path)
+    engine = create_engine("sqlite:///:memory:")
+    session_factory = sessionmaker(bind=engine)
+    service = install_db_dump_hook(
+        session_factory=session_factory,
+        vault_path=vault_path,
+        db_path=db_path,
+        db_key_hex="ab" * 32,
+        app_data_dir=app_data_dir,
+        event_store=store,
+    )
+    calls: list[int] = []
+    service.flush_pending_dump_check = lambda: calls.append(1)  # type: ignore[method-assign]
+
+    flush_db_dump_hook(session_factory)
+
+    assert calls == [1]
+
+
+def test_install_db_dump_hook_schedules_after_commit(tmp_path: Path) -> None:
+    vault_path = tmp_path / "vault"
+    app_data_dir = tmp_path / "app"
+    app_data_dir.mkdir(parents=True, exist_ok=True)
+    db_path = tmp_path / "vaults" / "vault-1" / "vault.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    db_path.write_bytes(b"x" * 1024)
+    store = _store(vault_path)
+    engine = create_engine("sqlite:///:memory:")
+    session_factory = sessionmaker(bind=engine)
+    service = install_db_dump_hook(
+        session_factory=session_factory,
+        vault_path=vault_path,
+        db_path=db_path,
+        db_key_hex="ab" * 32,
+        app_data_dir=app_data_dir,
+        event_store=store,
+    )
+    calls: list[int] = []
+    service.schedule_dump_check = lambda: calls.append(1)  # type: ignore[method-assign]
+
+    with session_factory() as session:
+        session.commit()
+
+    assert calls == [1]

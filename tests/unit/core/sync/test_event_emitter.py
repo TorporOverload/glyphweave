@@ -116,3 +116,45 @@ def test_event_emitter_observes_existing_remote_hlc_on_startup(
         logical=6,
         device_id="device-a",
     )
+
+
+def test_event_emitter_seeds_hlc_from_frontier_heads_without_full_scan(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    app_data_dir = tmp_path / "app"
+    app_data_dir.mkdir(parents=True, exist_ok=True)
+    (app_data_dir / "device.json").write_text(
+        json.dumps({"device_id": "device-a", "name": "A", "status": "active"}),
+        encoding="utf-8",
+    )
+    vault_path = tmp_path / "vault"
+    store = _store(vault_path)
+    remote_event = VaultEvent(
+        event_id="evt-remote",
+        type=EventType.FOLDER_CREATE,
+        device_id="device-b",
+        hlc=HybridLogicalClock(wall_time=2000, logical=4, device_id="device-b"),
+        payload={"node_id": "remote-folder", "parent_node_id": None, "name": "shared"},
+        parents=[],
+    )
+    store.append_event(remote_event)
+    monkeypatch.setattr(
+        store,
+        "discover_events",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("unexpected full scan")
+        ),
+    )
+    monkeypatch.setattr(hlc_module.time, "time", lambda: 1.0)
+
+    emitter = EventEmitter(store=store, app_data_dir=app_data_dir)
+    local_event = emitter.emit_folder_create(
+        _Entry(name="docs", node_id="folder-1", is_folder=True)
+    )
+
+    assert local_event.hlc == HybridLogicalClock(
+        wall_time=2000,
+        logical=6,
+        device_id="device-a",
+    )

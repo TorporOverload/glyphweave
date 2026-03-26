@@ -9,6 +9,7 @@ FUSE_MOUNTS_DIR = "fuse-mounts"
 WAL_TEMP_BLOBS_DIR = "temp-blobs"
 DECRYPTED_FILES_DIR = "decrypted-files"
 PLAINTEXT_STAGING_DIR = ".tmp"
+REPLAY_CHECKPOINT_FILE = "replay-frontier.json"
 
 
 def local_data_path_for(app_data_dir: Path, vault_id: str) -> Path:
@@ -49,3 +50,7 @@ def plaintext_staging_dir(cache_dir: Path) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     return path
 
+
+def replay_checkpoint_path(local_data_path: Path) -> Path:
+    """Return the local replay checkpoint file path for the given vault."""
+    return Path(local_data_path) / REPLAY_CHECKPOINT_FILE

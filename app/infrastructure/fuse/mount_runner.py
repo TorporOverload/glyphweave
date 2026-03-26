@@ -32,7 +32,10 @@ from app.infrastructure.persistence.event_store import EventStore
 from app.infrastructure.persistence.event_store_config import EventStoreConfig
 from app.common.paths.runtime_layout import runtime_cache_dir
 from app.infrastructure.fuse.single_fs import SingleFileFS
-from app.infrastructure.persistence.db_dump_service import install_db_dump_hook
+from app.infrastructure.persistence.db_dump_service import (
+    flush_db_dump_hook,
+    install_db_dump_hook,
+)
 from app.common.paths.vault_layout import vault_key_path
 
 
@@ -124,46 +127,49 @@ def main() -> int:
         app_data_dir=vaults_data_dir.parent,
         event_store=event_store,
     )
-    file_service = FileService(session_factory)
+    try:
+        file_service = FileService(session_factory)
 
-    file_ref = file_service.get_file_reference_with_blobs(file_ref_id)
-    if not file_ref or not file_ref.file_entry:
-        return 1
+        file_ref = file_service.get_file_reference_with_blobs(file_ref_id)
+        if not file_ref or not file_ref.file_entry:
+            return 1
 
-    entry = file_ref.file_entry
-    blob_ids = sorted(
-        [b.blob_id for b in entry.blobs],
-        key=lambda bid: next(b.blob_index for b in entry.blobs if b.blob_id == bid),
-    )
+        entry = file_ref.file_entry
+        blob_ids = sorted(
+            [b.blob_id for b in entry.blobs],
+            key=lambda bid: next(b.blob_index for b in entry.blobs if b.blob_id == bid),
+        )
 
-    fs = SingleFileFS(
-        file_name=args.mount_file_name or file_ref.name,
-        file_id=entry.file_id,
-        file_ref_id=file_ref_id,
-        plaintext_size=entry.original_size_bytes,
-        blob_ids=blob_ids,
-        vault_path=vault_path,
-        cache_dir=cache_dir,
-        mount_dir=mount_dir,
-        key_service=key_service,
-        vault_id=args.vault_id.encode("utf-8"),
-        session_factory=session_factory,
-    )
+        fs = SingleFileFS(
+            file_name=args.mount_file_name or file_ref.name,
+            file_id=entry.file_id,
+            file_ref_id=file_ref_id,
+            plaintext_size=entry.original_size_bytes,
+            blob_ids=blob_ids,
+            vault_path=vault_path,
+            cache_dir=cache_dir,
+            mount_dir=mount_dir,
+            key_service=key_service,
+            vault_id=args.vault_id.encode("utf-8"),
+            session_factory=session_factory,
+        )
 
-    fuse_kwargs: dict = {
-        "foreground": True,
-        "nothreads": False,
-        "uid": -1,
-        "gid": -1,
-        "umask": 0,
-        "FileSystemName": "NTFS",
-        "attr_timeout": -1,
-        "entry_timeout": -1,
-        "negative_timeout": 0,
-        "FileInfoTimeout": -1,
-    }
-    FUSE(fs, str(mount_dir), **fuse_kwargs)
-    return 0
+        fuse_kwargs: dict = {
+            "foreground": True,
+            "nothreads": False,
+            "uid": -1,
+            "gid": -1,
+            "umask": 0,
+            "FileSystemName": "NTFS",
+            "attr_timeout": -1,
+            "entry_timeout": -1,
+            "negative_timeout": 0,
+            "FileInfoTimeout": -1,
+        }
+        FUSE(fs, str(mount_dir), **fuse_kwargs)
+        return 0
+    finally:
+        flush_db_dump_hook(session_factory)
 
 
 if __name__ == "__main__":

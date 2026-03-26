@@ -1,12 +1,9 @@
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import sessionmaker
 
 from app.infrastructure.persistence.db.base import Base
-from app.infrastructure.persistence.db.model.file_reference import FileReference
 from app.infrastructure.persistence.db.service.file_service import FileService
 from app.infrastructure.persistence.db.service.folder_service import FolderService
-from app.infrastructure.persistence.db.service.session import session_scope
-from app.infrastructure.persistence.db.service.sync_bootstrap import bootstrap_file_reference_node_ids
 
 
 def _build_services(tmp_path):
@@ -79,79 +76,14 @@ def test_node_id_survives_rename_and_move(tmp_path) -> None:
     assert moved.virtual_path == "/Target/final.txt"
 
 
-def test_sync_bootstrap_backfills_missing_node_ids(tmp_path) -> None:
+def test_file_reference_schema_defines_unique_node_id_index(tmp_path) -> None:
     db_path = tmp_path / "legacy_file_service.db"
     engine = create_engine(f"sqlite:///{db_path}")
-    with engine.begin() as conn:
-        conn.execute(
-            text(
-                """
-                CREATE TABLE file_entry (
-                    id INTEGER PRIMARY KEY,
-                    file_id VARCHAR NOT NULL UNIQUE,
-                    content_hash VARCHAR NOT NULL UNIQUE,
-                    mime_type VARCHAR NOT NULL,
-                    encrypted_size_bytes INTEGER NOT NULL,
-                    original_size_bytes INTEGER NOT NULL,
-                    text_extraction_status VARCHAR,
-                    extracted_text_preview TEXT,
-                    metadata_json TEXT,
-                    created_at DATETIME,
-                    updated_at DATETIME
-                )
-                """
-            )
-        )
-        conn.execute(
-            text(
-                """
-                CREATE TABLE file_reference (
-                    id INTEGER PRIMARY KEY,
-                    parent_id INTEGER,
-                    name VARCHAR NOT NULL,
-                    is_folder BOOLEAN NOT NULL DEFAULT 0,
-                    virtual_path VARCHAR NOT NULL UNIQUE,
-                    added_at DATETIME,
-                    modified_at DATETIME,
-                    accessed_at DATETIME,
-                    file_entry_id INTEGER
-                )
-                """
-            )
-        )
-        conn.execute(
-            text(
-                """
-                INSERT INTO file_reference (
-                    id, parent_id, name, is_folder, virtual_path,
-                    added_at, modified_at, accessed_at, file_entry_id
-                )
-                VALUES (1, NULL, 'docs', 1, '/docs', NULL, NULL, NULL, NULL)
-                """
-            )
-        )
-        conn.execute(
-            text(
-                """
-                INSERT INTO file_reference (
-                    id, parent_id, name, is_folder, virtual_path,
-                    added_at, modified_at, accessed_at, file_entry_id
-                )
-                VALUES (2, 1, 'report.txt', 0, '/docs/report.txt', NULL, NULL, NULL, NULL)
-                """
-            )
-        )
+    Base.metadata.create_all(engine)
 
-    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    indexes = {
+        index["name"]: index for index in inspect(engine).get_indexes("file_reference")
+    }
 
-    updated = bootstrap_file_reference_node_ids(session_factory)
-
-    assert updated == 2
-
-    with session_scope(session_factory, commit=False) as session:
-        refs = session.query(FileReference).order_by(FileReference.id).all()
-
-    assert len(refs) == 2
-    assert refs[0].node_id
-    assert refs[1].node_id
-    assert refs[0].node_id != refs[1].node_id
+    assert "ix_file_reference_node_id" in indexes
+    assert bool(indexes["ix_file_reference_node_id"]["unique"]) is True

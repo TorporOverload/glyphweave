@@ -5,10 +5,11 @@ import getpass
 import os
 import sys
 from dataclasses import dataclass
+from math import fsum
 from pathlib import Path
 from time import perf_counter
 
-from app.core.service.vault_service import VaultService
+from app.services.vault_service import VaultService
 
 
 @dataclass
@@ -26,6 +27,27 @@ class ImportResult:
     imported: int
     failed: int
     first_failure: str | None
+    indexed: int
+    deduplicated: int
+    total_elapsed_seconds: float
+    avg_elapsed_seconds: float
+    min_elapsed_seconds: float
+    max_elapsed_seconds: float
+
+
+@dataclass
+class SearchBenchmarkResult:
+    query: str
+    runs_requested: int
+    runs_completed: int
+    limit: int
+    result_count: int
+    has_more: bool
+    total_elapsed_seconds: float
+    avg_elapsed_seconds: float
+    min_elapsed_seconds: float
+    max_elapsed_seconds: float
+    error: str | None = None
 
 
 def parse_args() -> argparse.Namespace:
@@ -110,14 +132,48 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Only perform recursive import and exit.",
     )
+    parser.add_argument(
+        "--search-query",
+        action="append",
+        default=[],
+        help=(
+            "Run a search performance check for this query. Repeat the flag to test "
+            "multiple queries."
+        ),
+    )
+    parser.add_argument(
+        "--search-limit",
+        type=int,
+        default=20,
+        help="Maximum number of results to fetch per benchmarked query.",
+    )
+    parser.add_argument(
+        "--search-runs",
+        type=int,
+        default=3,
+        help="Number of timed runs to execute per search query (default: 3).",
+    )
+    parser.add_argument(
+        "--search-only",
+        action="store_true",
+        help="Run search performance checks and skip mount-capacity testing.",
+    )
 
     args = parser.parse_args()
     if args.max_files is not None and args.max_files <= 0:
         parser.error("--max-files must be greater than 0")
     if args.timeout <= 0:
         parser.error("--timeout must be greater than 0")
+    if args.search_limit <= 0:
+        parser.error("--search-limit must be greater than 0")
+    if args.search_runs <= 0:
+        parser.error("--search-runs must be greater than 0")
     if args.import_only and args.import_dir is None:
         parser.error("--import-only requires --import-dir")
+    if args.search_only and not args.search_query:
+        parser.error("--search-only requires at least one --search-query")
+    if args.import_only and args.search_only:
+        parser.error("--import-only and --search-only cannot be used together")
     return args
 
 
@@ -224,6 +280,14 @@ def _make_unique_name(desired: str, used_names: set[str]) -> str:
         counter += 1
 
 
+def _timing_summary(samples: list[float]) -> tuple[float, float, float, float]:
+    if not samples:
+        return 0.0, 0.0, 0.0, 0.0
+
+    total = fsum(samples)
+    return total, total / len(samples), min(samples), max(samples)
+
+
 def import_directory_recursive(
     service: VaultService,
     source_dir: Path,
@@ -239,15 +303,29 @@ def import_directory_recursive(
         key=lambda path: path.relative_to(source_dir).as_posix(),
     )
     if not files:
-        return ImportResult(attempted=0, imported=0, failed=0, first_failure=None)
+        return ImportResult(
+            attempted=0,
+            imported=0,
+            failed=0,
+            first_failure=None,
+            indexed=0,
+            deduplicated=0,
+            total_elapsed_seconds=0.0,
+            avg_elapsed_seconds=0.0,
+            min_elapsed_seconds=0.0,
+            max_elapsed_seconds=0.0,
+        )
 
     target_base_dir = _normalize_vault_dir_path(target_dir)
     names_cache: dict[str, set[str]] = {}
 
     imported = 0
     failed = 0
+    indexed = 0
+    deduplicated = 0
     first_failure: str | None = None
     total = len(files)
+    elapsed_samples: list[float] = []
 
     for idx, source_path in enumerate(files, start=1):
         relative_path = source_path.relative_to(source_dir)
@@ -261,21 +339,29 @@ def import_directory_recursive(
 
         base_name = f"{prefix}{relative_path.name}" if prefix else relative_path.name
         dest_name = _make_unique_name(base_name, used_names)
+        start = perf_counter()
 
         try:
-            service.add_file(
+            add_result = service.add_file(
                 source_path,
                 dest_name=dest_name,
                 dest_parent_virtual_path=vault_parent_dir,
             )
+            elapsed = perf_counter() - start
+            elapsed_samples.append(elapsed)
             used_names.add(dest_name)
             imported += 1
+            indexed += int(add_result.indexed)
+            deduplicated += int(add_result.deduplicated)
             vault_dest_path = _format_vault_file_path(vault_parent_dir, dest_name)
             print(
                 f"[IMPORT OK] {idx}/{total} src={relative_path.as_posix()} "
-                f"dest={vault_dest_path}"
+                f"dest={vault_dest_path} indexed={add_result.indexed} "
+                f"deduplicated={add_result.deduplicated} ({elapsed:.2f}s)"
             )
         except Exception as exc:
+            elapsed = perf_counter() - start
+            elapsed_samples.append(elapsed)
             failed += 1
             reason = f"{type(exc).__name__}: {exc}"
             vault_dest_path = _format_vault_file_path(vault_parent_dir, dest_name)
@@ -286,15 +372,84 @@ def import_directory_recursive(
                 )
             print(
                 f"[IMPORT FAIL] {idx}/{total} src={relative_path.as_posix()} "
-                f"dest={vault_dest_path} reason={reason}"
+                f"dest={vault_dest_path} reason={reason} ({elapsed:.2f}s)"
             )
 
+    total_elapsed, avg_elapsed, min_elapsed, max_elapsed = _timing_summary(
+        elapsed_samples
+    )
     return ImportResult(
         attempted=total,
         imported=imported,
         failed=failed,
         first_failure=first_failure,
+        indexed=indexed,
+        deduplicated=deduplicated,
+        total_elapsed_seconds=total_elapsed,
+        avg_elapsed_seconds=avg_elapsed,
+        min_elapsed_seconds=min_elapsed,
+        max_elapsed_seconds=max_elapsed,
     )
+
+
+def run_search_queries(
+    service: VaultService,
+    queries: list[str],
+    *,
+    limit: int,
+    runs: int,
+) -> list[SearchBenchmarkResult]:
+    results: list[SearchBenchmarkResult] = []
+
+    for query in queries:
+        elapsed_samples: list[float] = []
+        result_count = 0
+        has_more = False
+        error: str | None = None
+
+        for run_index in range(1, runs + 1):
+            start = perf_counter()
+            try:
+                page = service.search_page(query, limit=limit, offset=0)
+            except Exception as exc:
+                elapsed = perf_counter() - start
+                elapsed_samples.append(elapsed)
+                error = f"{type(exc).__name__}: {exc}"
+                print(
+                    f"[SEARCH FAIL] query={query!r} run={run_index}/{runs} "
+                    f"reason={error} ({elapsed:.4f}s)"
+                )
+                break
+
+            elapsed = perf_counter() - start
+            elapsed_samples.append(elapsed)
+            result_count = len(page.results)
+            has_more = page.has_more
+            print(
+                f"[SEARCH OK] query={query!r} run={run_index}/{runs} "
+                f"results={result_count} has_more={has_more} ({elapsed:.4f}s)"
+            )
+
+        total_elapsed, avg_elapsed, min_elapsed, max_elapsed = _timing_summary(
+            elapsed_samples
+        )
+        results.append(
+            SearchBenchmarkResult(
+                query=query,
+                runs_requested=runs,
+                runs_completed=len(elapsed_samples),
+                limit=limit,
+                result_count=result_count,
+                has_more=has_more,
+                total_elapsed_seconds=total_elapsed,
+                avg_elapsed_seconds=avg_elapsed,
+                min_elapsed_seconds=min_elapsed,
+                max_elapsed_seconds=max_elapsed,
+                error=error,
+            )
+        )
+
+    return results
 
 
 def verify_mount(mounts, info, verify_level: str, timeout: float) -> tuple[bool, str]:
@@ -345,11 +500,48 @@ def main() -> int:
             print(f"- Attempted: {import_result.attempted}")
             print(f"- Imported: {import_result.imported}")
             print(f"- Failed: {import_result.failed}")
+            print(f"- Indexed: {import_result.indexed}")
+            print(f"- Deduplicated: {import_result.deduplicated}")
+            print(f"- Total import time: {import_result.total_elapsed_seconds:.2f}s")
+            print(f"- Avg/import: {import_result.avg_elapsed_seconds:.2f}s")
+            print(f"- Fastest import: {import_result.min_elapsed_seconds:.2f}s")
+            print(f"- Slowest import: {import_result.max_elapsed_seconds:.2f}s")
             if import_result.first_failure:
                 print(f"- First failure: {import_result.first_failure}")
 
             if args.import_only:
                 if import_result.failed > 0:
+                    return 1
+                return 0
+
+        if args.search_query:
+            print("\nRunning search performance checks...")
+            search_results = run_search_queries(
+                service,
+                args.search_query,
+                limit=args.search_limit,
+                runs=args.search_runs,
+            )
+
+            print("\nSearch benchmark summary")
+            failed_searches = 0
+            for result in search_results:
+                print(f"- Query: {result.query!r}")
+                print(
+                    f"  Runs completed: {result.runs_completed}/{result.runs_requested}"
+                )
+                print(f"  Result count: {result.result_count}")
+                print(f"  Has more: {result.has_more}")
+                print(f"  Total time: {result.total_elapsed_seconds:.4f}s")
+                print(f"  Avg/run: {result.avg_elapsed_seconds:.4f}s")
+                print(f"  Fastest run: {result.min_elapsed_seconds:.4f}s")
+                print(f"  Slowest run: {result.max_elapsed_seconds:.4f}s")
+                if result.error:
+                    failed_searches += 1
+                    print(f"  Error: {result.error}")
+
+            if args.search_only:
+                if failed_searches > 0:
                     return 1
                 return 0
 
@@ -388,14 +580,16 @@ def main() -> int:
             if ok:
                 opened += 1
                 print(
-                    f"[OK] {idx}/{total} ref={
-                        file_ref.id} path={file_ref.virtual_path} "
+                    f"[OK] {idx}/{total} ref={file_ref.id} path={
+                        file_ref.virtual_path
+                    } "
                     f"active={mounts.active_mount_count} ({elapsed:.2f}s)"
                 )
             else:
                 print(
-                    f"[FAIL] {idx}/{total} ref={
-                        file_ref.id} path={file_ref.virtual_path} "
+                    f"[FAIL] {idx}/{total} ref={file_ref.id} path={
+                        file_ref.virtual_path
+                    } "
                     f"reason={detail} ({elapsed:.2f}s)"
                 )
                 if mounts.is_mounted(file_ref.id):
