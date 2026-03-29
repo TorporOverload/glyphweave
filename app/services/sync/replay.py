@@ -25,6 +25,7 @@ def replay_vault_events(
     vault_path: Path,
     store: EventStore,
     local_data_path: Path | None = None,
+    app_data_dir: Path | None = None,
 ) -> BatchProcessingResult:
     """Discover, sort, and apply immutable vault events."""
     processed_hashes = _load_processed_event_hashes(session_factory)
@@ -55,6 +56,14 @@ def replay_vault_events(
     ordered = sorted(discovered, key=_sort_key)
     processor = EventProcessor(session_factory)
     result = processor.process_batch(ordered)
+    _emit_conflict_resolution_events(
+        result,
+        session_factory=session_factory,
+        store=store,
+        app_data_dir=app_data_dir,
+        local_data_path=local_data_path,
+    )
+    current_frontier = store.iter_frontier_hashes()
     logger.info(
         "Event replay completed: total=%s successful=%s"
         " skipped=%s failed=%s conflicts=%s",
@@ -66,6 +75,95 @@ def replay_vault_events(
     )
     _update_replay_checkpoint(local_data_path, current_frontier, session_factory)
     return result
+
+
+def refresh_replay_checkpoint(
+    *,
+    store: EventStore,
+    session_factory: sessionmaker,
+    local_data_path: Path | None,
+) -> None:
+    """Refresh the local replay checkpoint from the store's current frontier."""
+    _update_replay_checkpoint(
+        local_data_path,
+        store.iter_frontier_hashes(),
+        session_factory,
+    )
+
+
+def _emit_conflict_resolution_events(
+    result: BatchProcessingResult,
+    *,
+    session_factory: sessionmaker,
+    store: EventStore,
+    app_data_dir: Path | None,
+    local_data_path: Path | None,
+) -> None:
+    if app_data_dir is None:
+        return
+
+    from types import SimpleNamespace
+
+    from sqlalchemy.orm import joinedload
+
+    from app.infrastructure.persistence.db.model.file_entry import FileEntry
+    from app.infrastructure.persistence.db.model.file_reference import FileReference
+    from app.services.sync.event_emitter import EventEmitter
+
+    emitter = EventEmitter(
+        store=store,
+        app_data_dir=app_data_dir,
+        session_factory=session_factory,
+        local_data_path=local_data_path,
+    )
+
+    for item in result.results:
+        info = item.conflict_info or {}
+        if info.get("kind") != "file_conflict_archive":
+            continue
+
+        node_id = info.get("node_id")
+        archived_name = info.get("archived_name")
+        if not node_id or not archived_name:
+            continue
+
+        with session_scope(session_factory, commit=False) as session:
+            file_ref = (
+                session.query(FileReference)
+                .options(
+                    joinedload(FileReference.file_entry).joinedload(FileEntry.blobs),
+                    joinedload(FileReference.parent),
+                )
+                .filter(FileReference.node_id == str(node_id))
+                .first()
+            )
+            if file_ref is None or file_ref.file_entry is None:
+                continue
+            file_ref_payload = SimpleNamespace(
+                node_id=file_ref.node_id,
+                name=file_ref.name,
+                parent=SimpleNamespace(node_id=file_ref.parent.node_id)
+                if file_ref.parent is not None
+                else None,
+                file_entry=SimpleNamespace(
+                    file_id=file_ref.file_entry.file_id,
+                    blobs=[
+                        SimpleNamespace(blob_id=blob.blob_id)
+                        for blob in file_ref.file_entry.blobs
+                    ],
+                    content_hash=file_ref.file_entry.content_hash,
+                    mime_type=file_ref.file_entry.mime_type,
+                    original_size_bytes=file_ref.file_entry.original_size_bytes,
+                    encrypted_size_bytes=file_ref.file_entry.encrypted_size_bytes,
+                    metadata_json=file_ref.file_entry.metadata_json,
+                ),
+            )
+
+        emitter.emit_file_conflict_archive(
+            file_ref_payload,
+            file_ref_payload.file_entry,
+            str(archived_name),
+        )
 
 
 def _sort_key(discovered: DiscoveredEvent) -> tuple[int, int, str, str]:
@@ -149,7 +247,7 @@ def _update_replay_checkpoint(
 
 def is_event_ready_for_replay(vault_path: Path, discovered: DiscoveredEvent) -> bool:
     event = discovered.event
-    if event.type == EventType.FILE_ADD:
+    if event.type in {EventType.FILE_ADD, EventType.FILE_CONFLICT_ARCHIVE}:
         payload = FileAddData.from_dict(event.payload)
         return _all_blobs_exist(vault_path, payload.blob_ids)
     if event.type == EventType.FILE_UPDATE:

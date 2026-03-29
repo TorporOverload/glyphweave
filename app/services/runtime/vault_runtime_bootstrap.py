@@ -56,6 +56,7 @@ def bootstrap_runtime_services(context: VaultContext) -> None:
         vault_path=vault_path,
         store=context.event_store,
         local_data_path=local_data_path,
+        app_data_dir=context.app_data_dir,
     )
     dump_service = install_db_dump_hook(
         session_factory=context.session_factory,

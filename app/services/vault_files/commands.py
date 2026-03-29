@@ -110,9 +110,20 @@ def delete_entries(service, source_virtual_paths: list[str]) -> int:
     event_emitter = service._build_event_emitter()
     orphan_ids: list[int] = []
     for entry in entries:
-        if event_emitter is not None:
-            service._emit_delete_event(entry)
+        file_id: str | None = None
+        if (
+            event_emitter is not None
+            and not entry.is_folder
+            and entry.file_entry_id is not None
+        ):
+            hydrated = service._require_file_service().get_file_reference_with_blobs(
+                entry.id
+            )
+            if hydrated is not None and hydrated.file_entry is not None:
+                file_id = hydrated.file_entry.file_id
         orphan_ids.extend(folder_service.delete_entry(entry.id))
+        if event_emitter is not None:
+            service._emit_delete_event(entry, file_id=file_id)
     folder_service.gc.cleanup_batch(orphan_ids)
     return len(entries)
 

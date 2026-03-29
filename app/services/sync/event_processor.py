@@ -102,6 +102,9 @@ class EventProcessor:
     def _handle_file_update(self, session, event):
         return file_handlers.handle_file_update(self, session, event)
 
+    def _handle_file_conflict_archive(self, session, event):
+        return file_handlers.handle_file_conflict_archive(self, session, event)
+
     def _handle_file_move(self, session, event):
         return file_lifecycle_handlers.handle_file_move(self, session, event)
 
@@ -128,6 +131,9 @@ class EventProcessor:
 
     def _resolve_parent_for_add(self, session, parent_node_id, event_hlc):
         return state.resolve_parent_for_add(self, session, parent_node_id, event_hlc)
+
+    def _resolve_parent_for_move(self, session, parent_node_id, event_hlc):
+        return state.resolve_parent_for_move(self, session, parent_node_id, event_hlc)
 
     def _record_processed_event(self, session, event, event_hash, result):
         state.record_processed_event(session, event, event_hash, result)

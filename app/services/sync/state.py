@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from enum import Enum
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -19,6 +20,19 @@ class HLCFields:
     wall_time: int
     logical: int
     device_id: str
+
+
+class ParentResolutionStatus(str, Enum):
+    FOUND = "found"
+    CONFLICT_ARCHIVE = "conflict_archive"
+    STALE_DELETED_PARENT = "stale_deleted_parent"
+    MISSING_PARENT = "missing_parent"
+
+
+@dataclass(frozen=True)
+class ParentResolution:
+    parent: FileReference | None
+    status: ParentResolutionStatus
 
 
 def get_ref_by_node_id(session: Session, node_id: str) -> FileReference | None:
@@ -41,24 +55,71 @@ def resolve_parent_for_add(
     session: Session,
     parent_node_id: str | None,
     event_hlc: HybridLogicalClock,
-) -> FileReference | None:
+) -> ParentResolution:
     if parent_node_id is None:
-        return None
+        return ParentResolution(parent=None, status=ParentResolutionStatus.FOUND)
     parent = get_ref_by_node_id(session, parent_node_id)
     if parent is not None:
-        return parent
+        return ParentResolution(parent=parent, status=ParentResolutionStatus.FOUND)
     tombstone = session.scalar(
         select(SyncTombstone).where(SyncTombstone.node_id == parent_node_id)
     )
-    if tombstone is not None:
-        tombstone_hlc = {
-            "wall_time": tombstone.hlc_wall_time,
-            "logical": tombstone.hlc_logical,
-            "device_id": tombstone.hlc_device_id,
-        }
-        if compare_hlc(event_hlc.to_dict(), tombstone_hlc) > 0:
-            return processor._get_or_create_conflict_folder(session)
-    raise ValueError(f"Parent node not found: {parent_node_id}")
+    if tombstone is None:
+        return ParentResolution(
+            parent=None, status=ParentResolutionStatus.MISSING_PARENT
+        )
+    tombstone_hlc = {
+        "wall_time": tombstone.hlc_wall_time,
+        "logical": tombstone.hlc_logical,
+        "device_id": tombstone.hlc_device_id,
+    }
+    if compare_hlc(event_hlc.to_dict(), tombstone_hlc) > 0:
+        return ParentResolution(
+            parent=processor._get_or_create_conflict_folder(session),
+            status=ParentResolutionStatus.CONFLICT_ARCHIVE,
+        )
+    return ParentResolution(
+        parent=None,
+        status=ParentResolutionStatus.STALE_DELETED_PARENT,
+    )
+
+
+def resolve_parent_for_move(
+    processor,
+    session: Session,
+    parent_node_id: str | None,
+    event_hlc: HybridLogicalClock,
+) -> ParentResolution:
+    if parent_node_id is None:
+        return ParentResolution(parent=None, status=ParentResolutionStatus.FOUND)
+
+    parent = get_ref_by_node_id(session, parent_node_id)
+    if parent is not None:
+        return ParentResolution(parent=parent, status=ParentResolutionStatus.FOUND)
+
+    tombstone = session.scalar(
+        select(SyncTombstone).where(SyncTombstone.node_id == parent_node_id)
+    )
+    if tombstone is None:
+        return ParentResolution(
+            parent=None, status=ParentResolutionStatus.MISSING_PARENT
+        )
+
+    tombstone_hlc = {
+        "wall_time": tombstone.hlc_wall_time,
+        "logical": tombstone.hlc_logical,
+        "device_id": tombstone.hlc_device_id,
+    }
+    if compare_hlc(event_hlc.to_dict(), tombstone_hlc) > 0:
+        return ParentResolution(
+            parent=processor._get_or_create_conflict_folder(session),
+            status=ParentResolutionStatus.CONFLICT_ARCHIVE,
+        )
+
+    return ParentResolution(
+        parent=None,
+        status=ParentResolutionStatus.STALE_DELETED_PARENT,
+    )
 
 
 def record_processed_event(

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.common.device_id import load_device_id
 from app.common.logging import logger
@@ -10,15 +10,29 @@ from app.infrastructure.persistence.event_store import EventStore
 from app.core.domain.sync.event_types import EventType
 from app.core.domain.sync.hlc import HLCClock, compare_hlc
 from app.core.domain.sync.models import HybridLogicalClock, VaultEvent
+from app.services.sync.event_processor import EventProcessor
+from app.services.sync.replay import refresh_replay_checkpoint
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import sessionmaker
 
 
 class EventEmitter:
     """Emit local vault mutations into the append-only event store."""
 
-    def __init__(self, store: EventStore, app_data_dir: Path) -> None:
+    def __init__(
+        self,
+        store: EventStore,
+        app_data_dir: Path,
+        *,
+        session_factory: "sessionmaker | None" = None,
+        local_data_path: Path | None = None,
+    ) -> None:
         self._store = store
         self._device_id = load_device_id(app_data_dir)
         self._clock = HLCClock(device_id=self._device_id)
+        self._session_factory = session_factory
+        self._local_data_path = local_data_path
         self._observe_existing_events()
 
     def emit_file_add(self, file_ref: Any) -> VaultEvent:
@@ -38,6 +52,26 @@ class EventEmitter:
             "metadata_json": file_entry.metadata_json,
         }
         return self._append(EventType.FILE_ADD, payload)
+
+    def emit_file_conflict_archive(
+        self,
+        file_ref: Any,
+        file_entry: Any,
+        archived_name: str,
+    ) -> VaultEvent:
+        payload = {
+            "node_id": file_ref.node_id,
+            "file_id": file_entry.file_id,
+            "parent_node_id": None,
+            "name": archived_name,
+            "blob_ids": [blob.blob_id for blob in getattr(file_entry, "blobs", [])],
+            "content_hash": file_entry.content_hash,
+            "mime_type": file_entry.mime_type,
+            "file_size_bytes": file_entry.original_size_bytes,
+            "encrypted_size_bytes": file_entry.encrypted_size_bytes,
+            "metadata_json": file_entry.metadata_json,
+        }
+        return self._append(EventType.FILE_CONFLICT_ARCHIVE, payload)
 
     def emit_file_update(
         self,
@@ -132,7 +166,9 @@ class EventEmitter:
             payload=payload,
             parents=frontier,
         )
-        return self._store.append_event(event)
+        stored = self._store.append_event(event)
+        self._process_local_event(stored)
+        return stored
 
     def _next_hlc(self) -> HybridLogicalClock:
         wall_time, logical, device_id = self._clock.next()
@@ -157,3 +193,25 @@ class EventEmitter:
                 latest = candidate
         if latest is not None:
             self._clock.observe(latest)
+
+    def _process_local_event(self, event: VaultEvent) -> None:
+        if self._session_factory is None:
+            return
+
+        try:
+            result = EventProcessor(self._session_factory).process_event(event)
+            logger.debug(
+                "Processed locally emitted event %s with status=%s",
+                event.event_id,
+                result.status.value,
+            )
+            refresh_replay_checkpoint(
+                store=self._store,
+                session_factory=self._session_factory,
+                local_data_path=self._local_data_path,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to process locally emitted event %s; it will replay later",
+                event.event_id,
+            )

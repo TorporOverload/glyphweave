@@ -5,6 +5,7 @@ from enum import Enum
 
 class EventType(str, Enum):
     FILE_ADD = "file_add"
+    FILE_CONFLICT_ARCHIVE = "file_conflict_archive"
     FILE_UPDATE = "file_update"
     FILE_MOVE = "file_move"
     FILE_DELETE = "file_delete"

@@ -180,6 +180,7 @@ class EventReplayRuntime:
                 vault_path=self._context.require_vault_path(),
                 store=self._store,
                 local_data_path=self._context.local_data_path,
+                app_data_dir=self._context.app_data_dir,
             )
             if result.total > 0:
                 self._on_replayed(self._context)

@@ -13,6 +13,7 @@ from app.core.domain.sync.models import (
     VaultEvent,
 )
 from app.infrastructure.persistence.db.model.file_reference import FileReference
+from app.services.sync.state import ParentResolutionStatus
 
 CONFLICT_FOLDER_NAME = ".glyphweave_conflicts"
 
@@ -53,9 +54,20 @@ def handle_folder_create(
             message="Folder node already deleted by a newer event",
         )
 
-    parent = processor._resolve_parent_for_add(
+    resolution = processor._resolve_parent_for_add(
         session, parsed.parent_node_id, event.hlc
     )
+    if resolution.status == ParentResolutionStatus.STALE_DELETED_PARENT:
+        return ProcessingResult(
+            event_id=event.event_id,
+            event_type=event.type.value,
+            status=ProcessingStatus.SKIPPED_DUPLICATE,
+            message="Folder create targets a parent deleted by a newer event",
+        )
+    if resolution.status == ParentResolutionStatus.MISSING_PARENT:
+        raise ValueError(f"Invalid parent node: {parsed.parent_node_id}")
+
+    parent = resolution.parent
     folder_ref = FileReference(
         node_id=parsed.node_id,
         parent=parent,
@@ -66,7 +78,9 @@ def handle_folder_create(
     session.add(folder_ref)
     session.flush()
     conflict_archived = False
-    if parent is not None and parent.name == CONFLICT_FOLDER_NAME:
+    if resolution.status == ParentResolutionStatus.CONFLICT_ARCHIVE or (
+        parent is not None and parent.name == CONFLICT_FOLDER_NAME
+    ):
         folder_ref.name = processor._conflict_name(folder_ref.name, event.hlc)
         session.flush()
         conflict_archived = True
@@ -119,9 +133,27 @@ def handle_folder_move(
             message="Folder node not found",
         )
 
-    parent = processor._get_parent_ref(session, parsed.new_parent_node_id)
-    folder_ref.parent = parent
+    resolution = processor._resolve_parent_for_move(
+        session,
+        parsed.new_parent_node_id,
+        event.hlc,
+    )
+    if resolution.status == ParentResolutionStatus.STALE_DELETED_PARENT:
+        return ProcessingResult(
+            event_id=event.event_id,
+            event_type=event.type.value,
+            status=ProcessingStatus.SKIPPED_DUPLICATE,
+            message="Folder move targets a parent deleted by a newer event",
+        )
+    if resolution.status == ParentResolutionStatus.MISSING_PARENT:
+        raise ValueError(f"Invalid parent node: {parsed.new_parent_node_id}")
+
+    folder_ref.parent = resolution.parent
     folder_ref.name = parsed.new_name
+    conflict_archived = False
+    if resolution.status == ParentResolutionStatus.CONFLICT_ARCHIVE:
+        folder_ref.name = processor._conflict_name(parsed.new_name, event.hlc)
+        conflict_archived = True
     session.flush()
     processor._upsert_sync_state(
         session, parsed.node_id, event.hlc, True, False, event.event_id
@@ -129,8 +161,16 @@ def handle_folder_move(
     return ProcessingResult(
         event_id=event.event_id,
         event_type=event.type.value,
-        status=ProcessingStatus.SUCCESS,
-        message="Folder moved",
+        status=(
+            ProcessingStatus.CONFLICT_ARCHIVED
+            if conflict_archived
+            else ProcessingStatus.SUCCESS
+        ),
+        message=(
+            "Folder move archived to conflict folder"
+            if conflict_archived
+            else "Folder moved"
+        ),
         affected_ids=[folder_ref.id],
     )
 

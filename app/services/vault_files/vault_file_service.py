@@ -48,6 +48,8 @@ class VaultFileService:
         self.context.event_emitter = EventEmitter(
             store=build_event_store(self.context),
             app_data_dir=self.context.app_data_dir,
+            session_factory=self.context.session_factory,
+            local_data_path=self.context.local_data_path,
         )
         return self.context.event_emitter
 
@@ -136,21 +138,21 @@ class VaultFileService:
                 new_name=new_name,
             )
 
-    def _emit_delete_event(self, entry) -> None:
+    def _emit_delete_event(self, entry, *, file_id: str | None = None) -> None:
         event_emitter = self._build_event_emitter()
         if event_emitter is None:
             return
         if entry.is_folder:
             event_emitter.emit_folder_delete(entry, cascade=True)
             return
-        file_id = None
-        if entry.file_entry_id is not None:
+        resolved_file_id = file_id
+        if resolved_file_id is None and entry.file_entry_id is not None:
             hydrated = self._require_file_service().get_file_reference_with_blobs(
                 entry.id
             )
             if hydrated is not None and hydrated.file_entry is not None:
-                file_id = hydrated.file_entry.file_id
-        event_emitter.emit_file_delete(entry, file_id=file_id)
+                resolved_file_id = hydrated.file_entry.file_id
+        event_emitter.emit_file_delete(entry, file_id=resolved_file_id)
 
     def add_file(
         self,

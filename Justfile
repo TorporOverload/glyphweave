@@ -2,6 +2,7 @@ set shell := ["powershell", "-NoLogo", "-Command"]
 
 run:
     $env:GLYPHWEAVE_DEBUG = "3"; \
+    $env:GLYPHWEAVE_EVENT_ENCRYPTION = "0"; \
     uv run glyphweave
 
 test target='' output='0':

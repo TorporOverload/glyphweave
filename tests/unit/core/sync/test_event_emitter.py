@@ -1,9 +1,15 @@
 import json
 
 import app.core.domain.sync.hlc as hlc_module
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
+
 from app.core.domain.sync.event_types import EventType
 from app.core.domain.sync.models import HybridLogicalClock, VaultEvent
+from app.common.paths.runtime_layout import replay_checkpoint_path
 from app.infrastructure.crypto.primitives.secure_memory import SecureMemory
+from app.infrastructure.persistence.db.base import Base
+from app.infrastructure.persistence.db.model.processed_event import ProcessedEvent
 from app.infrastructure.persistence.event_store import EventStore
 from app.infrastructure.persistence.event_store_config import EventStoreConfig
 from app.services.sync.event_emitter import EventEmitter
@@ -158,3 +164,39 @@ def test_event_emitter_seeds_hlc_from_frontier_heads_without_full_scan(
         logical=6,
         device_id="device-a",
     )
+
+
+def test_event_emitter_processes_local_event_and_refreshes_checkpoint(tmp_path) -> None:
+    app_data_dir = tmp_path / "app"
+    app_data_dir.mkdir(parents=True, exist_ok=True)
+    (app_data_dir / "device.json").write_text(
+        json.dumps({"device_id": "device-a", "name": "A", "status": "active"}),
+        encoding="utf-8",
+    )
+    local_data_path = tmp_path / "local"
+    local_data_path.mkdir(parents=True, exist_ok=True)
+    vault_path = tmp_path / "vault"
+    store = _store(vault_path)
+    engine = create_engine(f"sqlite:///{tmp_path / 'event_emitter.db'}")
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    emitter = EventEmitter(
+        store=store,
+        app_data_dir=app_data_dir,
+        session_factory=session_factory,
+        local_data_path=local_data_path,
+    )
+    event = emitter.emit_folder_create(
+        _Entry(name="docs", node_id="folder-1", is_folder=True)
+    )
+
+    with session_factory() as session:
+        processed = session.scalars(select(ProcessedEvent)).all()
+
+    assert len(processed) == 1
+    assert processed[0].event_hash == event.event_hash
+    checkpoint = json.loads(
+        replay_checkpoint_path(local_data_path).read_text(encoding="utf-8")
+    )
+    assert checkpoint["frontier"] == [event.event_hash]
