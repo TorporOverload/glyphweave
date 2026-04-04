@@ -89,6 +89,9 @@ class FileReference(Base):
         return f"{parent_path}/{self.name}"
 
 
+from app.infrastructure.persistence.db.utils import escape_like_pattern as _escape_like_pattern
+
+
 @event.listens_for(FileReference, "before_insert")
 @event.listens_for(FileReference, "before_update")
 def generate_virtual_path(_mapper, _connection, target: FileReference) -> None:
@@ -116,7 +119,12 @@ def propagate_path_to_children(mapper, connection, target: FileReference) -> Non
     if old_path and new_path:
         stmt = (
             update(FileReference)
-            .where(FileReference.virtual_path.like(old_path + "/%"))
+            .where(
+                FileReference.virtual_path.like(
+                    _escape_like_pattern(old_path) + "/%",
+                    escape="\\",
+                )
+            )
             .values(
                 virtual_path=new_path
                 + func.substr(FileReference.virtual_path, len(old_path) + 1)

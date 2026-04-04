@@ -9,6 +9,7 @@ from app.infrastructure.persistence.db.model.file_reference import FileReference
 from app.infrastructure.persistence.db.service.gc_service import GarbageCollector
 from app.infrastructure.persistence.db.service.session import session_scope
 from app.common.logging import logger
+from app.infrastructure.persistence.db.utils import escape_like_pattern as _escape_like_pattern
 
 
 class FolderService:
@@ -248,7 +249,12 @@ class FolderService:
                 # Get all descendants (files and folders) under this folder
                 descendants = session.scalars(
                     select(FileReference)
-                    .where(FileReference.virtual_path.like(virtual_path + "/%"))
+                    .where(
+                        FileReference.virtual_path.like(
+                            _escape_like_pattern(virtual_path) + "/%",
+                            escape="\\",
+                        )
+                    )
                 ).all()
 
                 # Collect file_entry_ids from files and delete descendants

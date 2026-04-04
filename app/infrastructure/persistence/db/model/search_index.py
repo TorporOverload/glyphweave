@@ -84,8 +84,16 @@ CREATE TRIGGER IF NOT EXISTS trigger_file_entry_content_changed
 """)  # noqa: S608
 
 
+_ddl_listeners_registered = False
+
+
 def register_ddl_listeners():
     """Register all database views and triggers."""
+    global _ddl_listeners_registered
+    if _ddl_listeners_registered:
+        return
+    _ddl_listeners_registered = True
+
     event.listen(Base.metadata, "after_create", create_search_index_table)
     event.listen(Base.metadata, "after_create", create_search_filename_index_table)
     event.listen(Base.metadata, "after_create", trigger_search_index_delete)
@@ -94,4 +102,3 @@ def register_ddl_listeners():
     event.listen(Base.metadata, "after_create", trigger_search_filename_index_update)
     event.listen(Base.metadata, "after_create", trigger_file_entry_content_changed)
     event.listen(Base.metadata, "after_create", sync_search_filename_index)
-

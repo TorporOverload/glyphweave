@@ -26,10 +26,36 @@ from app.infrastructure.persistence.db.model.processed_event import (  # noqa: F
 from app.infrastructure.persistence.db.model.sync_node_state import (  # noqa: F401, E402
     SyncNodeState,
 )
+from app.infrastructure.persistence.db.model.sync_conflict import SyncConflict  # noqa: F401, E402
 from app.infrastructure.persistence.db.model.sync_tombstone import (  # noqa: F401, E402
     SyncTombstone,
 )
 from app.infrastructure.persistence.db.model.WAL_entry import WalEntry  # noqa: F401, E402
+
+REQUIRED_SCHEMA_TABLES = frozenset(
+    {
+        "file_entry",
+        "file_reference",
+        "file_blob_reference",
+        "wal_entries",
+        "processed_event",
+        "sync_node_state",
+        "sync_tombstone",
+        "sync_conflict",
+        "search_index",
+        "search_filename_index",
+    }
+)
+
+REQUIRED_SCHEMA_TRIGGERS = frozenset(
+    {
+        "trigger_delete_search_index",
+        "trigger_insert_search_filename_index",
+        "trigger_delete_search_filename_index",
+        "trigger_update_search_filename_index",
+        "trigger_file_entry_content_changed",
+    }
+)
 
 
 class DbBase:
@@ -60,21 +86,45 @@ class DbBase:
             bind=self.engine, autoflush=False, autocommit=False
         )
 
+    def initialize_schema(self) -> None:
+        """Create tables, FTS objects, and one-time schema-level PRAGMAs."""
         try:
-            # Register FTS5 triggers and views
             from app.infrastructure.persistence.db.model.search_index import (
                 register_ddl_listeners,
             )
 
             register_ddl_listeners()
 
-            # Create all tables with explicit connection and commit
             with self.engine.begin() as conn:
                 Base.metadata.create_all(bind=conn)
-                logger.info(f"Database initialized for vault {vault_id}")
+                logger.info("Database schema initialized at %s", self.db_path)
         except Exception as e:
             logger.error(f"Error creating database tables: {e}")
             raise
+
+    def get_missing_schema_objects(self) -> tuple[set[str], set[str]]:
+        """Return the required tables and triggers that are still absent."""
+        with self.engine.connect() as conn:
+            rows = conn.exec_driver_sql(
+                """
+                SELECT type, name
+                FROM sqlite_master
+                WHERE type IN ('table', 'trigger')
+                """
+            ).fetchall()
+
+        present_tables = {str(name) for row_type, name in rows if row_type == "table"}
+        present_triggers = {
+            str(name) for row_type, name in rows if row_type == "trigger"
+        }
+        return (
+            set(REQUIRED_SCHEMA_TABLES - present_tables),
+            set(REQUIRED_SCHEMA_TRIGGERS - present_triggers),
+        )
+
+    def has_required_schema_objects(self) -> bool:
+        missing_tables, missing_triggers = self.get_missing_schema_objects()
+        return not missing_tables and not missing_triggers
 
     @staticmethod
     def resolve_db_path(vault_id: str, vaults_data_dir: Path) -> Path:

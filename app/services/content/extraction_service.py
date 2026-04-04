@@ -41,14 +41,22 @@ def _run_kreuzberg_extraction(file_path: Path) -> tuple[str, dict[str, Any]]:
     return content, metadata
 
 
-def _is_unsupported_pdf_parse_error(file_path: Path, error_text: str) -> bool:
-    if file_path.suffix.lower() != ".pdf":
-        return False
+def _is_unsupported_parse_error(file_path: Path, error_text: str) -> bool:
+    suffix = file_path.suffix.lower()
     normalized = error_text.lower()
-    return (
-        "invalid pdf" in normalized
-        or "pdfiumlibraryinternalerror: formaterror" in normalized
-    )
+    if suffix == ".pdf":
+        return (
+            "invalid pdf" in normalized
+            or "pdf is password-protected" in normalized
+            or "pdfiumlibraryinternalerror: formaterror" in normalized
+        )
+    if suffix in {".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"}:
+        return (
+            "password-protected" in normalized
+            or "password protected" in normalized
+            or "encrypted" in normalized
+        )
+    return False
 
 
 class ExtractionService:
@@ -83,5 +91,5 @@ class ExtractionService:
             error_text = str(exc)
             return ExtractionResult(
                 error=error_text,
-                unsupported=_is_unsupported_pdf_parse_error(path, error_text),
+                unsupported=_is_unsupported_parse_error(path, error_text),
             )
