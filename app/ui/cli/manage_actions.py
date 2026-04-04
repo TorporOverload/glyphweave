@@ -5,6 +5,7 @@ from typing import Any
 
 from app.common.logging import logger
 
+from .conflict_actions import manage_sync_conflicts
 from .renderers import parse_path_list, render_vault_menu_lines
 
 
@@ -16,6 +17,7 @@ def manage_entries(cli: Any) -> None:
     print("3. Delete file/folder(s)")
     print("4. Rename file/folder")
     print("5. Export file/folder(s)")
+    print("6. Manage sync conflicts")
 
     action = input("\nSelect option (blank to go back): ").strip()
     if not action:
@@ -34,6 +36,9 @@ def manage_entries(cli: Any) -> None:
         return
     if action == "5":
         export_entries(cli)
+        return
+    if action == "6":
+        manage_sync_conflicts(cli)
         return
     print("Invalid selection.")
 
@@ -170,7 +175,7 @@ def vault_menu(cli: Any) -> None:
         print("\n" + "=" * 40)
         cli._print_lines(render_vault_menu_lines(cli.service.vault_name))
 
-        choice = input("\nSelect option (1-9): ").strip()
+        choice = input("\nSelect option (1-10): ").strip()
 
         if choice == "1":
             cli.list_files()
@@ -189,6 +194,8 @@ def vault_menu(cli: Any) -> None:
         elif choice == "8":
             cli.show_db_key()
         elif choice == "9":
+            cli.manage_sync_conflicts()
+        elif choice == "10":
             print("\nClosing vault...")
             break
         else:

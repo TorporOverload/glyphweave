@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 
 from app.core.domain.sync.models import (
     FileAddData,
+    FileConflictArchiveData,
+    FileConflictResolvedData,
     FileUpdateData,
     ProcessingResult,
     ProcessingStatus,
@@ -17,9 +19,13 @@ from app.infrastructure.persistence.db.model.file_blob_reference import (
 )
 from app.infrastructure.persistence.db.model.file_entry import FileEntry
 from app.infrastructure.persistence.db.model.file_reference import FileReference
+from app.infrastructure.persistence.db.service.sync_conflict_service import (
+    resolve_sync_conflict,
+    upsert_sync_conflict,
+)
 
 from .folder_handlers import CONFLICT_FOLDER_NAME
-from .state import ParentResolutionStatus
+from .state import ParentResolutionStatus, build_conflict_info_and_persist
 
 
 def handle_file_add(processor, session: Session, event: VaultEvent) -> ProcessingResult:
@@ -113,6 +119,19 @@ def handle_file_add(processor, session: Session, event: VaultEvent) -> Processin
     processor._upsert_sync_state(
         session, parsed.node_id, event.hlc, True, True, event.event_id
     )
+    conflict_info = (
+        build_conflict_info_and_persist(
+            session,
+            ref=file_ref,
+            event=event,
+            node_kind="file",
+            reason_code="deleted_parent_add",
+            reason_text="File add targeted a parent folder that had already been deleted",
+            file_entry_id=file_ref.file_entry_id,
+        )
+        if conflict_archived
+        else None
+    )
     return ProcessingResult(
         event_id=event.event_id,
         event_type=event.type.value,
@@ -125,16 +144,7 @@ def handle_file_add(processor, session: Session, event: VaultEvent) -> Processin
             "File archived to conflict folder" if conflict_archived else "File added"
         ),
         affected_ids=[file_ref.id],
-        conflict_info=(
-            {
-                "kind": "file_conflict_archive",
-                "node_id": file_ref.node_id,
-                "file_entry_id": file_ref.file_entry_id,
-                "archived_name": file_ref.name,
-            }
-            if conflict_archived
-            else None
-        ),
+        conflict_info=conflict_info,
     )
 
 
@@ -213,13 +223,24 @@ def handle_file_update(
 def handle_file_conflict_archive(
     processor, session: Session, event: VaultEvent
 ) -> ProcessingResult:
-    parsed = FileAddData.from_dict(event.payload)
+    parsed = FileConflictArchiveData.from_dict(event.payload)
     if processor._is_deleted_after_or_equal(session, parsed.node_id, event.hlc):
         return ProcessingResult(
             event_id=event.event_id,
             event_type=event.type.value,
             status=ProcessingStatus.SKIPPED_DUPLICATE,
             message="Conflict archive is older than a newer delete tombstone",
+        )
+    structural_hlc = processor._structural_hlc_for_node(session, parsed.node_id)
+    content_hlc = processor._content_hlc_for_node(session, parsed.node_id)
+    if processor._is_stale_event(event.hlc, structural_hlc) or processor._is_stale_event(
+        event.hlc, content_hlc
+    ):
+        return ProcessingResult(
+            event_id=event.event_id,
+            event_type=event.type.value,
+            status=ProcessingStatus.SKIPPED_DUPLICATE,
+            message="Stale file_conflict_archive event",
         )
 
     existing_ref = processor._get_ref_by_node_id(session, parsed.node_id)
@@ -252,7 +273,7 @@ def handle_file_conflict_archive(
         file_ref = FileReference(
             node_id=parsed.node_id,
             parent=conflict_folder,
-            name=parsed.name,
+            name=parsed.archived_name,
             is_folder=False,
             file_entry_id=file_entry.id,
         )
@@ -267,11 +288,29 @@ def handle_file_conflict_archive(
                 message="Conflict archive targets a folder node",
             )
         existing_ref.parent = conflict_folder
-        existing_ref.name = parsed.name
+        existing_ref.name = parsed.archived_name
         existing_ref.file_entry_id = file_entry.id
         existing_ref.modified_at = datetime.now(timezone.utc)
         session.flush()
         file_ref = existing_ref
+
+    upsert_sync_conflict(
+        session,
+        conflict_id=parsed.conflict_id,
+        node_id=parsed.node_id,
+        node_kind="file",
+        archived_name=file_ref.name,
+        archived_virtual_path=file_ref.virtual_path,
+        archived_file_ref_id=file_ref.id,
+        file_entry_id=file_entry.id,
+        reason_code=parsed.reason_code,
+        reason_text=parsed.reason_text,
+        trigger_event_id=parsed.trigger_event_id or event.event_id,
+        trigger_event_hash=parsed.trigger_event_hash,
+        trigger_event_type=parsed.trigger_event_type,
+        origin_device_id=parsed.origin_device_id or event.device_id,
+        status="active",
+    )
 
     processor._upsert_sync_state(
         session, parsed.node_id, event.hlc, True, True, event.event_id
@@ -282,4 +321,31 @@ def handle_file_conflict_archive(
         status=ProcessingStatus.SUCCESS,
         message="File archived to shared conflict folder",
         affected_ids=[file_ref.id],
+    )
+
+
+def handle_file_conflict_resolved(
+    processor, session: Session, event: VaultEvent
+) -> ProcessingResult:
+    parsed = FileConflictResolvedData.from_dict(event.payload)
+    conflict = resolve_sync_conflict(
+        session,
+        conflict_id=parsed.conflict_id,
+        resolution_event_id=event.event_id,
+        status=parsed.resolution_status,
+    )
+    if conflict is None:
+        return ProcessingResult(
+            event_id=event.event_id,
+            event_type=event.type.value,
+            status=ProcessingStatus.SKIPPED_IDEMPOTENT,
+            message="Sync conflict record already absent",
+        )
+
+    return ProcessingResult(
+        event_id=event.event_id,
+        event_type=event.type.value,
+        status=ProcessingStatus.SUCCESS,
+        message="Sync conflict resolved",
+        affected_ids=[conflict.id],
     )

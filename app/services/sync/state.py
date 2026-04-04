@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
+import uuid
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -33,6 +34,67 @@ class ParentResolutionStatus(str, Enum):
 class ParentResolution:
     parent: FileReference | None
     status: ParentResolutionStatus
+
+
+def build_conflict_id(node_id: str, reason_code: str, trigger_event_id: str) -> str:
+    return str(
+        uuid.uuid5(uuid.NAMESPACE_URL, f"{node_id}:{reason_code}:{trigger_event_id}")
+    )
+
+
+def build_conflict_info_and_persist(
+    session: Session,
+    *,
+    ref: FileReference,
+    event: VaultEvent,
+    node_kind: str,
+    reason_code: str,
+    reason_text: str,
+    file_entry_id: int | None = None,
+) -> dict:
+    """Build a conflict info dict and persist a SyncConflict record.
+
+    Centralises the repeated pattern of building the conflict metadata dict
+    and calling ``upsert_sync_conflict`` that appears across file and folder
+    conflict-archive handlers.
+    """
+    from app.infrastructure.persistence.db.service.sync_conflict_service import (
+        upsert_sync_conflict,
+    )
+
+    conflict_id = build_conflict_id(ref.node_id, reason_code, event.event_id)
+    conflict_info = {
+        "conflict_id": conflict_id,
+        "kind": f"{node_kind}_conflict_archive",
+        "node_id": ref.node_id,
+        "archived_name": ref.name,
+        "reason_code": reason_code,
+        "reason_text": reason_text,
+        "trigger_event_id": event.event_id,
+        "trigger_event_hash": event.event_hash,
+        "trigger_event_type": event.type.value,
+        "trigger_device_id": event.device_id,
+    }
+    if file_entry_id is not None:
+        conflict_info["file_entry_id"] = file_entry_id
+
+    upsert_sync_conflict(
+        session,
+        conflict_id=str(conflict_id),
+        node_id=ref.node_id,
+        node_kind=node_kind,
+        archived_name=ref.name,
+        archived_virtual_path=ref.virtual_path,
+        archived_file_ref_id=ref.id,
+        file_entry_id=file_entry_id,
+        reason_code=reason_code,
+        reason_text=reason_text,
+        trigger_event_id=event.event_id,
+        trigger_event_hash=event.event_hash,
+        trigger_event_type=event.type.value,
+        origin_device_id=event.device_id,
+    )
+    return conflict_info
 
 
 def get_ref_by_node_id(session: Session, node_id: str) -> FileReference | None:
@@ -246,6 +308,24 @@ def upsert_sync_state(
     state.last_event_id = event_id
     state.updated_at = datetime.now(timezone.utc)
     session.flush()
+
+
+def local_resolution_event_id(conflict_id: str, resolution_status: str) -> str:
+    """Build a deterministic event ID for a locally-initiated conflict resolution."""
+    return f"local:{resolution_status}:{conflict_id}"
+
+
+def is_conflict_path(virtual_path: str | None) -> bool:
+    """Check whether a virtual path resides *under* the conflict folder.
+
+    The trailing slash means only children are matched
+    (e.g. ``/.glyphweave_conflicts/foo``), not the conflict folder itself.
+    """
+    from app.services.sync.folder_handlers import CONFLICT_FOLDER_NAME
+
+    if not virtual_path:
+        return False
+    return virtual_path.startswith(f"/{CONFLICT_FOLDER_NAME}/")
 
 
 def record_tombstone(

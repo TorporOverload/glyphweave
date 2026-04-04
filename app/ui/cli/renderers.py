@@ -99,7 +99,8 @@ def render_vault_menu_lines(vault_name: str | None) -> list[str]:
         "6. Manage files/folders",
         "7. Show recovery phrase",
         "8. Show DB key (debug)",
-        "9. Exit",
+        "9. Manage sync conflicts",
+        "10. Exit",
         "=" * 40,
     ]
 

@@ -58,20 +58,54 @@ class EventEmitter:
         file_ref: Any,
         file_entry: Any,
         archived_name: str,
+        *,
+        conflict_id: str,
+        reason_code: str,
+        reason_text: str,
+        trigger_event_id: str,
+        trigger_event_type: str,
+        trigger_device_id: str,
+        trigger_event_hash: str | None = None,
     ) -> VaultEvent:
         payload = {
+            "conflict_id": conflict_id,
             "node_id": file_ref.node_id,
             "file_id": file_entry.file_id,
-            "parent_node_id": None,
+            "parent_node_id": file_ref.parent.node_id if file_ref.parent else None,
             "name": archived_name,
+            "archived_name": archived_name,
             "blob_ids": [blob.blob_id for blob in getattr(file_entry, "blobs", [])],
             "content_hash": file_entry.content_hash,
             "mime_type": file_entry.mime_type,
             "file_size_bytes": file_entry.original_size_bytes,
             "encrypted_size_bytes": file_entry.encrypted_size_bytes,
             "metadata_json": file_entry.metadata_json,
+            "reason_code": reason_code,
+            "reason_text": reason_text,
+            "trigger_event_id": trigger_event_id,
+            "trigger_event_hash": trigger_event_hash,
+            "trigger_event_type": trigger_event_type,
+            "trigger_device_id": trigger_device_id,
+            "origin_device_id": self._device_id,
         }
         return self._append(EventType.FILE_CONFLICT_ARCHIVE, payload)
+
+    def emit_file_conflict_resolved(
+        self,
+        *,
+        conflict_id: str,
+        node_id: str,
+        resolution_status: str = "deleted",
+        resolution_reason: str = "explicit_delete",
+    ) -> VaultEvent:
+        payload = {
+            "conflict_id": conflict_id,
+            "node_id": node_id,
+            "resolution_status": resolution_status,
+            "resolution_reason": resolution_reason,
+            "origin_device_id": self._device_id,
+        }
+        return self._append(EventType.FILE_CONFLICT_RESOLVED, payload)
 
     def emit_file_update(
         self,
@@ -143,6 +177,51 @@ class EventEmitter:
             "new_name": new_name,
         }
         return self._append(EventType.FOLDER_MOVE, payload)
+
+    def emit_folder_conflict_archive(
+        self,
+        folder_ref: Any,
+        archived_name: str,
+        *,
+        conflict_id: str,
+        reason_code: str,
+        reason_text: str,
+        trigger_event_id: str,
+        trigger_event_type: str,
+        trigger_device_id: str,
+        trigger_event_hash: str | None = None,
+    ) -> VaultEvent:
+        payload = {
+            "conflict_id": conflict_id,
+            "node_id": folder_ref.node_id,
+            "name": archived_name,
+            "archived_name": archived_name,
+            "reason_code": reason_code,
+            "reason_text": reason_text,
+            "trigger_event_id": trigger_event_id,
+            "trigger_event_hash": trigger_event_hash,
+            "trigger_event_type": trigger_event_type,
+            "trigger_device_id": trigger_device_id,
+            "origin_device_id": self._device_id,
+        }
+        return self._append(EventType.FOLDER_CONFLICT_ARCHIVE, payload)
+
+    def emit_folder_conflict_resolved(
+        self,
+        *,
+        conflict_id: str,
+        node_id: str,
+        resolution_status: str = "deleted",
+        resolution_reason: str = "explicit_delete",
+    ) -> VaultEvent:
+        payload = {
+            "conflict_id": conflict_id,
+            "node_id": node_id,
+            "resolution_status": resolution_status,
+            "resolution_reason": resolution_reason,
+            "origin_device_id": self._device_id,
+        }
+        return self._append(EventType.FOLDER_CONFLICT_RESOLVED, payload)
 
     def emit_folder_delete(
         self,

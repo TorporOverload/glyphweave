@@ -187,6 +187,19 @@ class VaultFileService:
     def rename_entry(self, source_virtual_path: str, new_name: str):
         return commands.rename_entry(self, source_virtual_path, new_name)
 
+    def restore_sync_conflict(
+        self,
+        conflict_id: str,
+        destination_folder_virtual_path: str = "/",
+        new_name: str | None = None,
+    ):
+        return commands.restore_sync_conflict(
+            self,
+            conflict_id,
+            destination_folder_virtual_path,
+            new_name,
+        )
+
     def export_entries(self, source_virtual_paths: list[str], destination_dir):
         return commands.export_entries(self, source_virtual_paths, destination_dir)
 
@@ -216,6 +229,12 @@ class VaultFileService:
 
     def get_recovery_phrase(self) -> str:
         return queries.get_recovery_phrase(self)
+
+    def list_sync_conflicts(self):
+        return queries.list_sync_conflicts(self)
+
+    def get_sync_conflict(self, conflict_id: str):
+        return queries.get_sync_conflict(self, conflict_id)
 
     @staticmethod
     def _select_supported_reference_name(entry) -> str | None:

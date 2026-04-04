@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 
 from app.infrastructure.persistence.db.service.search import (
@@ -7,9 +8,13 @@ from app.infrastructure.persistence.db.service.search import (
     search_content,
     search_file_references,
 )
+from app.infrastructure.persistence.db.service.sync_conflict_service import (
+    get_sync_conflict_by_id,
+    list_active_sync_conflicts,
+)
 from app.infrastructure.persistence.db.service.session import session_scope
 from app.services.content.extraction_service import ExtractionService
-from app.services.models import SearchPage, SearchResult
+from app.services.models import SearchPage, SearchResult, SyncConflictInfo
 
 
 def list_root_entries(service):
@@ -151,6 +156,28 @@ def get_recovery_phrase(service) -> str:
     return key_service.unwrap_recovery_phrase_with_master()
 
 
+def list_sync_conflicts(service) -> list[SyncConflictInfo]:
+    session_factory = service.context.session_factory
+    if session_factory is None:
+        raise RuntimeError("Session factory is not initialized")
+
+    with session_scope(session_factory, commit=False) as session:
+        conflicts = list_active_sync_conflicts(session)
+        return [_to_sync_conflict_info(conflict) for conflict in conflicts]
+
+
+def get_sync_conflict(service, conflict_id: str) -> SyncConflictInfo | None:
+    session_factory = service.context.session_factory
+    if session_factory is None:
+        raise RuntimeError("Session factory is not initialized")
+
+    with session_scope(session_factory, commit=False) as session:
+        conflict = get_sync_conflict_by_id(session, conflict_id)
+        if conflict is None:
+            return None
+        return _to_sync_conflict_info(conflict)
+
+
 def select_supported_reference_name(entry) -> str | None:
     for ref in getattr(entry, "references", []):
         name = getattr(ref, "name", "")
@@ -159,23 +186,44 @@ def select_supported_reference_name(entry) -> str | None:
     return None
 
 
+def _to_sync_conflict_info(conflict) -> SyncConflictInfo:
+    return SyncConflictInfo(
+        conflict_id=conflict.conflict_id,
+        node_id=conflict.node_id,
+        node_kind=conflict.node_kind,
+        archived_name=conflict.archived_name,
+        archived_virtual_path=conflict.archived_virtual_path,
+        reason_code=conflict.reason_code,
+        reason_text=conflict.reason_text,
+        trigger_event_id=conflict.trigger_event_id,
+        trigger_event_hash=conflict.trigger_event_hash,
+        trigger_event_type=conflict.trigger_event_type,
+        origin_device_id=conflict.origin_device_id,
+        status=conflict.status,
+        created_at=conflict.created_at,
+    )
+
+
 def format_filename_snippet(file_name: str, query: str) -> str:
-    exact_index = file_name.find(query)
+    safe_name = html.escape(file_name)
+    safe_query = html.escape(query)
+
+    exact_index = safe_name.find(safe_query)
     if exact_index >= 0:
         return (
-            f"Filename: {file_name[:exact_index]}<b>"
-            f"{file_name[exact_index : exact_index + len(query)]}</b>"
-            f"{file_name[exact_index + len(query) :]}"
+            f"Filename: {safe_name[:exact_index]}<b>"
+            f"{safe_name[exact_index : exact_index + len(safe_query)]}</b>"
+            f"{safe_name[exact_index + len(safe_query) :]}"
         )
 
-    lower_name = file_name.lower()
-    lower_query = query.lower()
+    lower_name = safe_name.lower()
+    lower_query = safe_query.lower()
     lower_index = lower_name.find(lower_query)
     if lower_index >= 0:
         return (
-            f"Filename: {file_name[:lower_index]}<b>"
-            f"{file_name[lower_index : lower_index + len(query)]}</b>"
-            f"{file_name[lower_index + len(query) :]}"
+            f"Filename: {safe_name[:lower_index]}<b>"
+            f"{safe_name[lower_index : lower_index + len(safe_query)]}</b>"
+            f"{safe_name[lower_index + len(safe_query) :]}"
         )
 
-    return f"Filename: {file_name}"
+    return f"Filename: {safe_name}"

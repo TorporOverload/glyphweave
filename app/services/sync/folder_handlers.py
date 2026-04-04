@@ -4,6 +4,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.domain.sync.models import (
+    FolderConflictArchiveData,
+    FolderConflictResolvedData,
     FolderCreateData,
     FolderDeleteData,
     FolderMoveData,
@@ -13,7 +15,13 @@ from app.core.domain.sync.models import (
     VaultEvent,
 )
 from app.infrastructure.persistence.db.model.file_reference import FileReference
-from app.services.sync.state import ParentResolutionStatus
+from app.infrastructure.persistence.db.service.sync_conflict_service import (
+    resolve_active_sync_conflicts_for_node_ids,
+    resolve_sync_conflict,
+    upsert_sync_conflict,
+)
+from app.infrastructure.persistence.db.utils import escape_like_pattern as _escape_like_pattern
+from app.services.sync.state import ParentResolutionStatus, build_conflict_info_and_persist, is_conflict_path as _is_conflict_path
 
 CONFLICT_FOLDER_NAME = ".glyphweave_conflicts"
 
@@ -87,6 +95,18 @@ def handle_folder_create(
     processor._upsert_sync_state(
         session, parsed.node_id, event.hlc, True, False, event.event_id
     )
+    conflict_info = (
+        build_conflict_info_and_persist(
+            session,
+            ref=folder_ref,
+            event=event,
+            node_kind="folder",
+            reason_code="deleted_parent_folder_create",
+            reason_text="Folder create targeted a parent folder that had already been deleted",
+        )
+        if conflict_archived
+        else None
+    )
     return ProcessingResult(
         event_id=event.event_id,
         event_type=event.type.value,
@@ -101,6 +121,7 @@ def handle_folder_create(
             else "Folder created"
         ),
         affected_ids=[folder_ref.id],
+        conflict_info=conflict_info,
     )
 
 
@@ -155,8 +176,27 @@ def handle_folder_move(
         folder_ref.name = processor._conflict_name(parsed.new_name, event.hlc)
         conflict_archived = True
     session.flush()
+    if not conflict_archived and not _is_conflict_path(folder_ref.virtual_path):
+        resolve_active_sync_conflicts_for_node_ids(
+            session,
+            node_ids=_subtree_node_ids(session, folder_ref),
+            resolution_event_id=event.event_id,
+            status="resolved",
+        )
     processor._upsert_sync_state(
         session, parsed.node_id, event.hlc, True, False, event.event_id
+    )
+    conflict_info = (
+        build_conflict_info_and_persist(
+            session,
+            ref=folder_ref,
+            event=event,
+            node_kind="folder",
+            reason_code="deleted_parent_folder_move",
+            reason_text="Folder move targeted a parent folder that had already been deleted",
+        )
+        if conflict_archived
+        else None
     )
     return ProcessingResult(
         event_id=event.event_id,
@@ -172,6 +212,7 @@ def handle_folder_move(
             else "Folder moved"
         ),
         affected_ids=[folder_ref.id],
+        conflict_info=conflict_info,
     )
 
 
@@ -197,6 +238,12 @@ def handle_folder_delete(
         )
     folder_ref = processor._get_ref_by_node_id(session, parsed.node_id)
     if folder_ref is None:
+        resolve_active_sync_conflicts_for_node_ids(
+            session,
+            node_ids=[parsed.node_id],
+            resolution_event_id=event.event_id,
+            status="deleted",
+        )
         processor._record_tombstone(session, parsed.node_id, "folder", event)
         processor._upsert_sync_state(
             session, parsed.node_id, event.hlc, True, False, event.event_id
@@ -208,6 +255,12 @@ def handle_folder_delete(
             message="Folder already deleted",
         )
 
+    resolve_active_sync_conflicts_for_node_ids(
+        session,
+        node_ids=_subtree_node_ids(session, folder_ref),
+        resolution_event_id=event.event_id,
+        status="deleted",
+    )
     affected_ids = delete_folder_subtree(session, folder_ref)
     processor._record_tombstone(session, parsed.node_id, "folder", event)
     processor._upsert_sync_state(
@@ -234,10 +287,115 @@ def handle_db_dump_created(
     )
 
 
+def handle_folder_conflict_archive(
+    processor, session: Session, event: VaultEvent
+) -> ProcessingResult:
+    parsed = FolderConflictArchiveData.from_dict(event.payload)
+    if processor._is_deleted_after_or_equal(session, parsed.node_id, event.hlc):
+        return ProcessingResult(
+            event_id=event.event_id,
+            event_type=event.type.value,
+            status=ProcessingStatus.SKIPPED_DUPLICATE,
+            message="Folder conflict archive is older than a newer delete tombstone",
+        )
+    if processor._is_stale_event(
+        event.hlc, processor._structural_hlc_for_node(session, parsed.node_id)
+    ):
+        return ProcessingResult(
+            event_id=event.event_id,
+            event_type=event.type.value,
+            status=ProcessingStatus.SKIPPED_DUPLICATE,
+            message="Stale folder_conflict_archive event",
+        )
+
+    existing_ref = processor._get_ref_by_node_id(session, parsed.node_id)
+    conflict_folder = processor._get_or_create_conflict_folder(session)
+    if existing_ref is None:
+        folder_ref = FileReference(
+            node_id=parsed.node_id,
+            parent=conflict_folder,
+            name=parsed.archived_name,
+            is_folder=True,
+            file_entry_id=None,
+        )
+        session.add(folder_ref)
+        session.flush()
+    else:
+        if not existing_ref.is_folder:
+            return ProcessingResult(
+                event_id=event.event_id,
+                event_type=event.type.value,
+                status=ProcessingStatus.FAILED,
+                message="Folder conflict archive targets a file node",
+            )
+        existing_ref.parent = conflict_folder
+        existing_ref.name = parsed.archived_name
+        session.flush()
+        folder_ref = existing_ref
+
+    upsert_sync_conflict(
+        session,
+        conflict_id=parsed.conflict_id,
+        node_id=parsed.node_id,
+        node_kind="folder",
+        archived_name=folder_ref.name,
+        archived_virtual_path=folder_ref.virtual_path,
+        archived_file_ref_id=folder_ref.id,
+        file_entry_id=None,
+        reason_code=parsed.reason_code,
+        reason_text=parsed.reason_text,
+        trigger_event_id=parsed.trigger_event_id or event.event_id,
+        trigger_event_hash=parsed.trigger_event_hash,
+        trigger_event_type=parsed.trigger_event_type,
+        origin_device_id=parsed.origin_device_id or event.device_id,
+        status="active",
+    )
+    processor._upsert_sync_state(
+        session, parsed.node_id, event.hlc, True, False, event.event_id
+    )
+    return ProcessingResult(
+        event_id=event.event_id,
+        event_type=event.type.value,
+        status=ProcessingStatus.SUCCESS,
+        message="Folder archived to shared conflict folder",
+        affected_ids=[folder_ref.id],
+    )
+
+
+def handle_folder_conflict_resolved(
+    processor, session: Session, event: VaultEvent
+) -> ProcessingResult:
+    parsed = FolderConflictResolvedData.from_dict(event.payload)
+    conflict = resolve_sync_conflict(
+        session,
+        conflict_id=parsed.conflict_id,
+        resolution_event_id=event.event_id,
+        status=parsed.resolution_status,
+    )
+    if conflict is None:
+        return ProcessingResult(
+            event_id=event.event_id,
+            event_type=event.type.value,
+            status=ProcessingStatus.SKIPPED_IDEMPOTENT,
+            message="Sync conflict record already absent",
+        )
+
+    return ProcessingResult(
+        event_id=event.event_id,
+        event_type=event.type.value,
+        status=ProcessingStatus.SUCCESS,
+        message="Folder sync conflict resolved",
+        affected_ids=[conflict.id],
+    )
+
+
 def delete_folder_subtree(session: Session, folder_ref: FileReference) -> list[int]:
     descendant_refs = session.scalars(
         select(FileReference).where(
-            FileReference.virtual_path.like(folder_ref.virtual_path + "/%")
+            FileReference.virtual_path.like(
+                _escape_like_pattern(folder_ref.virtual_path) + "/%",
+                escape="\\",
+            )
         )
     ).all()
     affected_ids = [folder_ref.id, *[ref.id for ref in descendant_refs]]
@@ -246,6 +404,18 @@ def delete_folder_subtree(session: Session, folder_ref: FileReference) -> list[i
     session.delete(folder_ref)
     session.flush()
     return affected_ids
+
+
+def _subtree_node_ids(session: Session, folder_ref: FileReference) -> list[str]:
+    descendant_node_ids = session.scalars(
+        select(FileReference.node_id).where(
+            FileReference.virtual_path.like(
+                _escape_like_pattern(folder_ref.virtual_path) + "/%",
+                escape="\\",
+            )
+        )
+    ).all()
+    return [folder_ref.node_id, *[str(node_id) for node_id in descendant_node_ids]]
 
 
 def get_or_create_conflict_folder(session: Session) -> FileReference:

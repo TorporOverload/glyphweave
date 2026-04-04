@@ -9,7 +9,14 @@ from app.core.domain.sync.models import (
     ProcessingStatus,
     VaultEvent,
 )
-from app.services.sync.state import ParentResolutionStatus
+from app.infrastructure.persistence.db.service.sync_conflict_service import (
+    resolve_active_sync_conflicts_for_node_ids,
+)
+from app.services.sync.state import (
+    ParentResolutionStatus,
+    build_conflict_info_and_persist,
+    is_conflict_path as _is_conflict_path,
+)
 
 
 def handle_file_move(
@@ -64,8 +71,28 @@ def handle_file_move(
         file_ref.name = processor._conflict_name(parsed.new_name, event.hlc)
         conflict_archived = True
     session.flush()
+    if not conflict_archived and not _is_conflict_path(file_ref.virtual_path):
+        resolve_active_sync_conflicts_for_node_ids(
+            session,
+            node_ids=[parsed.node_id],
+            resolution_event_id=event.event_id,
+            status="resolved",
+        )
     processor._upsert_sync_state(
         session, parsed.node_id, event.hlc, True, False, event.event_id
+    )
+    conflict_info = (
+        build_conflict_info_and_persist(
+            session,
+            ref=file_ref,
+            event=event,
+            node_kind="file",
+            reason_code="deleted_parent_move",
+            reason_text="File move targeted a parent folder that had already been deleted",
+            file_entry_id=file_ref.file_entry_id,
+        )
+        if conflict_archived
+        else None
     )
     return ProcessingResult(
         event_id=event.event_id,
@@ -81,16 +108,7 @@ def handle_file_move(
             else "File moved"
         ),
         affected_ids=[file_ref.id],
-        conflict_info=(
-            {
-                "kind": "file_conflict_archive",
-                "node_id": file_ref.node_id,
-                "file_entry_id": file_ref.file_entry_id,
-                "archived_name": file_ref.name,
-            }
-            if conflict_archived
-            else None
-        ),
+        conflict_info=conflict_info,
     )
 
 
@@ -117,6 +135,12 @@ def handle_file_delete(
         )
     file_ref = processor._get_ref_by_node_id(session, parsed.node_id)
     if file_ref is None:
+        resolve_active_sync_conflicts_for_node_ids(
+            session,
+            node_ids=[parsed.node_id],
+            resolution_event_id=event.event_id,
+            status="deleted",
+        )
         processor._record_tombstone(session, parsed.node_id, "file", event)
         processor._upsert_sync_state(
             session, parsed.node_id, event.hlc, True, True, event.event_id
@@ -129,6 +153,12 @@ def handle_file_delete(
         )
 
     ref_id = file_ref.id
+    resolve_active_sync_conflicts_for_node_ids(
+        session,
+        node_ids=[parsed.node_id],
+        resolution_event_id=event.event_id,
+        status="deleted",
+    )
     session.delete(file_ref)
     session.flush()
     processor._record_tombstone(session, parsed.node_id, "file", event)

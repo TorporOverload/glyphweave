@@ -149,6 +149,19 @@ class VaultService:
         """Rename a vault file or folder."""
         return self.files.rename_entry(source_virtual_path, new_name)
 
+    def restore_sync_conflict(
+        self,
+        conflict_id: str,
+        destination_folder_virtual_path: str = "/",
+        new_name: str | None = None,
+    ):
+        """Restore an archived sync-conflict item to a chosen destination."""
+        return self.files.restore_sync_conflict(
+            conflict_id,
+            destination_folder_virtual_path,
+            new_name,
+        )
+
     def export_entries(self, source_virtual_paths: list[str], destination_dir: Path):
         """Export one or more files or folders to the filesystem."""
         return self.files.export_entries(source_virtual_paths, destination_dir)
@@ -178,6 +191,14 @@ class VaultService:
     def get_db_debug_info(self) -> dict:
         """Return debug information about the vault database."""
         return self.files.get_db_debug_info()
+
+    def list_sync_conflicts(self):
+        """Return active synchronized conflict records."""
+        return self.files.list_sync_conflicts()
+
+    def get_sync_conflict(self, conflict_id: str):
+        """Return one synchronized conflict record by ID."""
+        return self.files.get_sync_conflict(conflict_id)
 
     def get_recovery_phrase(self) -> str:
         """Return the vault's recovery phrase."""

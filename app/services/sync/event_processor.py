@@ -105,6 +105,9 @@ class EventProcessor:
     def _handle_file_conflict_archive(self, session, event):
         return file_handlers.handle_file_conflict_archive(self, session, event)
 
+    def _handle_file_conflict_resolved(self, session, event):
+        return file_handlers.handle_file_conflict_resolved(self, session, event)
+
     def _handle_file_move(self, session, event):
         return file_lifecycle_handlers.handle_file_move(self, session, event)
 
@@ -113,6 +116,12 @@ class EventProcessor:
 
     def _handle_folder_create(self, session, event):
         return folder_handlers.handle_folder_create(self, session, event)
+
+    def _handle_folder_conflict_archive(self, session, event):
+        return folder_handlers.handle_folder_conflict_archive(self, session, event)
+
+    def _handle_folder_conflict_resolved(self, session, event):
+        return folder_handlers.handle_folder_conflict_resolved(self, session, event)
 
     def _handle_folder_move(self, session, event):
         return folder_handlers.handle_folder_move(self, session, event)

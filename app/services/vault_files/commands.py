@@ -1,13 +1,35 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
+
+from sqlalchemy import select
+
+from app.infrastructure.persistence.db.model.file_reference import FileReference
+from app.infrastructure.persistence.db.model.sync_conflict import SyncConflict
+from app.infrastructure.persistence.db.utils import escape_like_pattern as _escape_like_pattern
+from app.infrastructure.persistence.db.service.session import session_scope
+from app.infrastructure.persistence.db.service.sync_conflict_service import (
+    get_sync_conflict_by_id,
+    resolve_sync_conflict,
+)
+
+from app.services.sync.state import local_resolution_event_id as _local_resolution_event_id
 
 from .helpers import (
     collapse_descendant_entries,
     ensure_no_nested_selection,
     is_descendant_path,
+    normalize_vault_path,
 )
 from .vault_file_import import add_file as add_file_to_vault
+
+
+@dataclass(frozen=True)
+class _ConflictResolutionTarget:
+    conflict_id: str
+    node_id: str
+    node_kind: str
 
 
 def add_file(
@@ -111,6 +133,7 @@ def delete_entries(service, source_virtual_paths: list[str]) -> int:
     orphan_ids: list[int] = []
     for entry in entries:
         file_id: str | None = None
+        conflicts_to_resolve: list[_ConflictResolutionTarget] = []
         if (
             event_emitter is not None
             and not entry.is_folder
@@ -121,9 +144,33 @@ def delete_entries(service, source_virtual_paths: list[str]) -> int:
             )
             if hydrated is not None and hydrated.file_entry is not None:
                 file_id = hydrated.file_entry.file_id
+        session_factory = service.context.session_factory
+        if session_factory is not None:
+            with session_scope(session_factory, commit=False) as session:
+                conflicts_to_resolve = _list_active_conflicts_for_entry(
+                    session, entry
+                )
         orphan_ids.extend(folder_service.delete_entry(entry.id))
         if event_emitter is not None:
             service._emit_delete_event(entry, file_id=file_id)
+            resolution_event_ids = _emit_conflict_resolutions(
+                event_emitter,
+                conflicts_to_resolve,
+                resolution_status="deleted",
+                resolution_reason="explicit_delete",
+            )
+            _resolve_conflicts_locally(
+                session_factory,
+                conflicts_to_resolve,
+                resolution_status="deleted",
+                resolution_event_ids=resolution_event_ids,
+            )
+        elif session_factory is not None:
+            _resolve_conflicts_locally(
+                session_factory,
+                conflicts_to_resolve,
+                resolution_status="deleted",
+            )
     folder_service.gc.cleanup_batch(orphan_ids)
     return len(entries)
 
@@ -138,6 +185,80 @@ def rename_entry(service, source_virtual_path: str, new_name: str):
     )
     updated_entry = service._get_entry_by_id(source.id)
     service._emit_move_event(updated_entry, source.parent_id, new_name)
+    return updated_entry
+
+
+def restore_sync_conflict(
+    service,
+    conflict_id: str,
+    destination_folder_virtual_path: str = "/",
+    new_name: str | None = None,
+):
+    session_factory = service.context.session_factory
+    if session_factory is None:
+        raise RuntimeError("Session factory is not initialized")
+
+    normalized_destination = normalize_vault_path(destination_folder_virtual_path)
+    with session_scope(session_factory, commit=False) as session:
+        conflict = get_sync_conflict_by_id(session, conflict_id)
+        if conflict is None:
+            raise FileNotFoundError(f"Sync conflict not found: {conflict_id}")
+        if conflict.status != "active":
+            raise ValueError(f"Sync conflict is not active: {conflict_id}")
+
+        entry = session.scalar(
+            select(FileReference).where(FileReference.node_id == conflict.node_id)
+        )
+        if entry is None:
+            raise FileNotFoundError(
+                f"Archived conflict entry not found for node: {conflict.node_id}"
+            )
+
+        entry_id = entry.id
+        is_folder = entry.is_folder
+        current_name = entry.name
+        current_virtual_path = entry.virtual_path
+        conflicts_to_resolve = _list_active_conflicts_for_entry(session, entry)
+
+    if is_folder and is_descendant_path(normalized_destination, current_virtual_path):
+        raise ValueError("Cannot restore a folder into itself or its descendant")
+
+    destination_parent_id = service._resolve_or_create_destination_parent_id(
+        normalized_destination
+    )
+    target_name = new_name or current_name
+    folder_service = service._require_folder_service()
+    existing = folder_service.get_child_by_name(destination_parent_id, target_name)
+    if existing is not None and existing.id != entry_id:
+        raise FileExistsError(
+            f"An entry named '{target_name}' already exists in the destination"
+        )
+
+    folder_service.rename_entry(entry_id, target_name, destination_parent_id)
+    updated_entry = service._get_entry_by_id(entry_id)
+    service._emit_move_event(updated_entry, destination_parent_id, target_name)
+
+    event_emitter = service._build_event_emitter()
+    if event_emitter is not None:
+        resolution_event_ids = _emit_conflict_resolutions(
+            event_emitter,
+            conflicts_to_resolve,
+            resolution_status="resolved",
+            resolution_reason="explicit_restore",
+        )
+        _resolve_conflicts_locally(
+            session_factory,
+            conflicts_to_resolve,
+            resolution_status="resolved",
+            resolution_event_ids=resolution_event_ids,
+        )
+    else:
+        _resolve_conflicts_locally(
+            session_factory,
+            conflicts_to_resolve,
+            resolution_status="resolved",
+        )
+
     return updated_entry
 
 
@@ -229,3 +350,99 @@ def _export_reference(
         file_id=file_ref.file_entry.file_id,
     )
     return target_path
+
+
+def _list_active_conflicts_for_entry(
+    session,
+    entry: FileReference,
+) -> list[_ConflictResolutionTarget]:
+    node_ids = [entry.node_id]
+    if entry.is_folder:
+        escaped_virtual_path = _escape_like_pattern(entry.virtual_path)
+        node_ids.extend(
+            session.scalars(
+                select(FileReference.node_id).where(
+                    FileReference.virtual_path.like(
+                        escaped_virtual_path + "/%",
+                        escape="\\",
+                    )
+                )
+            ).all()
+        )
+
+    conflicts = session.scalars(
+        select(SyncConflict).where(
+            SyncConflict.status == "active",
+            SyncConflict.node_id.in_(node_ids),
+        )
+    ).all()
+    ordered = sorted(
+        conflicts,
+        key=lambda item: (
+            item.archived_virtual_path or "",
+            item.node_id,
+            item.conflict_id,
+        ),
+    )
+    return [
+        _ConflictResolutionTarget(
+            conflict_id=conflict.conflict_id,
+            node_id=conflict.node_id,
+            node_kind=conflict.node_kind,
+        )
+        for conflict in ordered
+    ]
+
+
+def _emit_conflict_resolutions(
+    event_emitter,
+    conflicts: list[_ConflictResolutionTarget],
+    *,
+    resolution_status: str,
+    resolution_reason: str,
+) -> dict[str, str]:
+    resolution_event_ids: dict[str, str] = {}
+    for conflict in conflicts:
+        if conflict.node_kind == "folder":
+            event = event_emitter.emit_folder_conflict_resolved(
+                conflict_id=conflict.conflict_id,
+                node_id=conflict.node_id,
+                resolution_status=resolution_status,
+                resolution_reason=resolution_reason,
+            )
+        else:
+            event = event_emitter.emit_file_conflict_resolved(
+                conflict_id=conflict.conflict_id,
+                node_id=conflict.node_id,
+                resolution_status=resolution_status,
+                resolution_reason=resolution_reason,
+            )
+        resolution_event_ids[conflict.conflict_id] = event.event_id
+    return resolution_event_ids
+
+
+def _resolve_conflicts_locally(
+    session_factory,
+    conflicts: list[_ConflictResolutionTarget],
+    *,
+    resolution_status: str,
+    resolution_event_ids: dict[str, str] | None = None,
+) -> None:
+    if not conflicts:
+        return
+
+    with session_scope(session_factory) as session:
+        for conflict in conflicts:
+            resolution_event_id = (
+                resolution_event_ids.get(conflict.conflict_id)
+                if resolution_event_ids is not None
+                else None
+            ) or _local_resolution_event_id(conflict.conflict_id, resolution_status)
+            resolve_sync_conflict(
+                session,
+                conflict_id=conflict.conflict_id,
+                resolution_event_id=resolution_event_id,
+                status=resolution_status,
+            )
+
+

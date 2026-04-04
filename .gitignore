@@ -64,3 +64,6 @@ test_data/
 .uv_cache/
 .test_vaults/
 .vault/
+
+
+qttest.py

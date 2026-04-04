@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from time import time
 from typing import TYPE_CHECKING, Any
@@ -72,6 +73,23 @@ class SearchResult:
 class SearchPage:
     results: list[SearchResult]
     has_more: bool
+
+
+@dataclass
+class SyncConflictInfo:
+    conflict_id: str
+    node_id: str
+    node_kind: str
+    archived_name: str
+    archived_virtual_path: str | None
+    reason_code: str
+    reason_text: str
+    trigger_event_id: str
+    trigger_event_hash: str | None
+    trigger_event_type: str
+    origin_device_id: str
+    status: str
+    created_at: datetime
 
 
 @dataclass

@@ -8,7 +8,7 @@ import sys
 
 from app.services.vault_service import VaultService
 
-from . import browse_actions, manage_actions, setup_flow
+from . import browse_actions, conflict_actions, manage_actions, setup_flow
 
 
 def check_os() -> None:
@@ -54,6 +54,9 @@ class VaultCLI:
 
     def manage_entries(self) -> None:
         manage_actions.manage_entries(self)
+
+    def manage_sync_conflicts(self) -> None:
+        conflict_actions.manage_sync_conflicts(self)
 
     def copy_entry(self) -> None:
         manage_actions.copy_entry(self)
