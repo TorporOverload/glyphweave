@@ -219,6 +219,128 @@ class FileUpdateData:
 
 
 @dataclass(frozen=True)
+class FileConflictArchiveData:
+    conflict_id: str
+    node_id: str
+    file_id: str
+    archived_name: str
+    blob_ids: list[str]
+    content_hash: str
+    mime_type: str
+    file_size_bytes: int
+    encrypted_size_bytes: int
+    reason_code: str
+    reason_text: str
+    trigger_event_id: str
+    trigger_event_type: str
+    trigger_device_id: str
+    origin_device_id: str
+    trigger_event_hash: str | None = None
+    metadata_json: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "FileConflictArchiveData":
+        return cls(
+            conflict_id=str(data["conflict_id"]),
+            node_id=str(data["node_id"]),
+            file_id=str(data["file_id"]),
+            archived_name=str(data.get("archived_name") or data.get("name") or ""),
+            blob_ids=[str(blob_id) for blob_id in data["blob_ids"]],
+            content_hash=str(data["content_hash"]),
+            mime_type=str(data["mime_type"]),
+            file_size_bytes=int(data["file_size_bytes"]),
+            encrypted_size_bytes=int(data["encrypted_size_bytes"]),
+            reason_code=str(data.get("reason_code", "unknown")),
+            reason_text=str(data.get("reason_text", "Conflict archive")),
+            trigger_event_id=str(data.get("trigger_event_id", "")),
+            trigger_event_type=str(data.get("trigger_event_type", "unknown")),
+            trigger_device_id=str(data.get("trigger_device_id", "")),
+            origin_device_id=str(data.get("origin_device_id", "")),
+            trigger_event_hash=(
+                str(data["trigger_event_hash"])
+                if data.get("trigger_event_hash") is not None
+                else None
+            ),
+            metadata_json=(
+                str(data["metadata_json"])
+                if data.get("metadata_json") is not None
+                else None
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class FileConflictResolvedData:
+    conflict_id: str
+    node_id: str
+    resolution_status: str
+    resolution_reason: str
+    origin_device_id: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "FileConflictResolvedData":
+        return cls(
+            conflict_id=str(data["conflict_id"]),
+            node_id=str(data["node_id"]),
+            resolution_status=str(data.get("resolution_status", "resolved")),
+            resolution_reason=str(data.get("resolution_reason", "explicit_action")),
+            origin_device_id=str(data.get("origin_device_id", "")),
+        )
+
+
+@dataclass(frozen=True)
+class FolderConflictArchiveData:
+    conflict_id: str
+    node_id: str
+    archived_name: str
+    reason_code: str
+    reason_text: str
+    trigger_event_id: str
+    trigger_event_type: str
+    trigger_device_id: str
+    origin_device_id: str
+    trigger_event_hash: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "FolderConflictArchiveData":
+        return cls(
+            conflict_id=str(data["conflict_id"]),
+            node_id=str(data["node_id"]),
+            archived_name=str(data.get("archived_name") or data.get("name") or ""),
+            reason_code=str(data.get("reason_code", "unknown")),
+            reason_text=str(data.get("reason_text", "Conflict archive")),
+            trigger_event_id=str(data.get("trigger_event_id", "")),
+            trigger_event_type=str(data.get("trigger_event_type", "unknown")),
+            trigger_device_id=str(data.get("trigger_device_id", "")),
+            origin_device_id=str(data.get("origin_device_id", "")),
+            trigger_event_hash=(
+                str(data["trigger_event_hash"])
+                if data.get("trigger_event_hash") is not None
+                else None
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class FolderConflictResolvedData:
+    conflict_id: str
+    node_id: str
+    resolution_status: str
+    resolution_reason: str
+    origin_device_id: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "FolderConflictResolvedData":
+        return cls(
+            conflict_id=str(data["conflict_id"]),
+            node_id=str(data["node_id"]),
+            resolution_status=str(data.get("resolution_status", "resolved")),
+            resolution_reason=str(data.get("resolution_reason", "explicit_action")),
+            origin_device_id=str(data.get("origin_device_id", "")),
+        )
+
+
+@dataclass(frozen=True)
 class FolderCreateData:
     node_id: str
     parent_node_id: str | None

@@ -120,6 +120,19 @@ class EventStore:
             discovered.append(DiscoveredEvent(event=event, source_path=str(path)))
         return discovered
 
+    def has_unprocessed_events(
+        self,
+        *,
+        skip_hashes: set[str] | None = None,
+    ) -> bool:
+        """Return True if at least one unprocessed event exists (no deserialization)."""
+        for path in self.objects_dir.glob("*.json"):
+            event_hash = path.stem
+            if skip_hashes is not None and event_hash in skip_hashes:
+                continue
+            return True
+        return False
+
     def read_frontier(self, device_id: str) -> list[str]:
         path = self.root_path(device_id)
         if not path.exists():

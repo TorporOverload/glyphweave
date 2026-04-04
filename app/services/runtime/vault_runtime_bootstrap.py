@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.infrastructure.crypto.service.encryption_service import EncryptionService
+from app.common.logging import logger
 from app.infrastructure.persistence.db.base import DbBase
 from app.infrastructure.persistence.db.service.search import get_retriable_extractions
 from app.infrastructure.persistence.db.service.file_service import FileService
@@ -37,7 +38,8 @@ def bootstrap_runtime_services(context: VaultContext) -> None:
 
     context.db_key_hex = key_service.derive_database_key()
     db_path = DbBase.resolve_db_path(vault_id, vaults_data_dir)
-    if not db_path.exists() or db_path.stat().st_size == 0:
+    needs_local_db = not db_path.exists() or db_path.stat().st_size == 0
+    if needs_local_db:
         restore_latest_db_dump(
             vault_path=vault_path,
             db_path=db_path,
@@ -48,6 +50,14 @@ def bootstrap_runtime_services(context: VaultContext) -> None:
         context.db_key_hex,
         vaults_data_dir=vaults_data_dir,
     )
+    missing_tables, missing_triggers = context.db.get_missing_schema_objects()
+    if missing_tables or missing_triggers:
+        logger.info(
+            "Repairing vault schema; missing tables=%s missing triggers=%s",
+            sorted(missing_tables),
+            sorted(missing_triggers),
+        )
+        context.db.initialize_schema()
     context.encryption_service = EncryptionService()
     context.session_factory = context.db.SessionLocal
     context.event_store = build_event_store(context)

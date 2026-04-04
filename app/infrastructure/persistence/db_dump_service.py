@@ -269,9 +269,23 @@ class DBDumpService:
         )
 
     def _observe_existing_events(self) -> None:
+        """Advance the local HLC from the newest readable frontier event.
+
+        This seeds the dump-service clock after startup so any DB dump events
+        emitted later are ordered after the current event-store frontier.
+        Missing or unreadable frontier objects are skipped because they should
+        not block clock initialization.
+        """
         latest: dict[str, object] | None = None
-        for discovered in self._event_store.discover_events():
-            candidate = discovered.event.hlc.to_dict()
+        for event_hash in self._event_store.iter_frontier_hashes():
+            try:
+                event = self._event_store.load_event(event_hash)
+            except FileNotFoundError:
+                continue
+            except Exception:
+                logger.exception("Failed to read frontier head event %s", event_hash)
+                continue
+            candidate = event.hlc.to_dict()
             if latest is None or compare_hlc(candidate, latest) > 0:
                 latest = candidate
         if latest is not None:

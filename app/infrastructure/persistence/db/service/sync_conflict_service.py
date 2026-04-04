@@ -34,7 +34,9 @@ def upsert_sync_conflict(
     (via ``uuid5``) and identical field values, so the overwrite is a no-op in
     practice.
     """
-    conflict = session.query(SyncConflict).filter_by(conflict_id=conflict_id).first()
+    conflict = session.scalar(
+        select(SyncConflict).where(SyncConflict.conflict_id == conflict_id)
+    )
     if conflict is None:
         conflict = SyncConflict(
             conflict_id=conflict_id,
@@ -74,24 +76,26 @@ def upsert_sync_conflict(
 
 
 def get_active_sync_conflict_for_node(session, node_id: str) -> SyncConflict | None:
-    return (
-        session.query(SyncConflict)
-        .filter_by(node_id=node_id, status="active")
+    return session.scalar(
+        select(SyncConflict)
+        .where(SyncConflict.node_id == node_id, SyncConflict.status == "active")
         .order_by(SyncConflict.created_at.desc())
-        .first()
     )
 
 
 def get_sync_conflict_by_id(session, conflict_id: str) -> SyncConflict | None:
-    return session.query(SyncConflict).filter_by(conflict_id=conflict_id).first()
+    return session.scalar(
+        select(SyncConflict).where(SyncConflict.conflict_id == conflict_id)
+    )
 
 
 def list_active_sync_conflicts(session) -> list[SyncConflict]:
     return list(
-        session.query(SyncConflict)
-        .filter_by(status="active")
-        .order_by(SyncConflict.created_at.desc())
-        .all()
+        session.scalars(
+            select(SyncConflict)
+            .where(SyncConflict.status == "active")
+            .order_by(SyncConflict.created_at.desc())
+        ).all()
     )
 
 
@@ -122,9 +126,14 @@ def resolve_sync_conflict(
     resolution_event_id: str,
     status: str = "deleted",
 ) -> SyncConflict | None:
-    conflict = session.query(SyncConflict).filter_by(conflict_id=conflict_id).first()
+    conflict = session.scalar(
+        select(SyncConflict).where(SyncConflict.conflict_id == conflict_id)
+    )
     if conflict is None:
         return None
+
+    if conflict.status != "active":
+        return conflict  # already resolved — no-op for idempotent replay
 
     conflict.status = status
     conflict.resolution_event_id = resolution_event_id
