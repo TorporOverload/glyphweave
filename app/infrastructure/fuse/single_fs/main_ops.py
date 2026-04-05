@@ -240,9 +240,13 @@ def release_op(fs, path, fh):
     has_dirty = handle.is_dirty
     dirty_chunks = handle.get_dirty_chunks() if has_dirty else {}
     flush_failed = False
+    old_ref = None
+    old_entry = None
 
     if has_dirty:
         try:
+            old_ref = fs.file_service.get_file_reference_with_blobs(fs.file_ref_id)
+            old_entry = old_ref.file_entry if old_ref is not None else None
             fs.chunk_store.flush_to_blobs(
                 file_id=fs.file_id,
                 file_ref_id=fs.file_ref_id,
@@ -250,6 +254,21 @@ def release_op(fs, path, fh):
                 original_size=handle.metadata.plaintext_size,
             )
             fs._refresh_after_flush()
+            if fs.event_emitter is not None:
+                updated_ref = fs.file_service.get_file_reference_with_blobs(
+                    fs.file_ref_id
+                )
+                new_entry = updated_ref.file_entry if updated_ref is not None else None
+                if (
+                    updated_ref is not None
+                    and new_entry is not None
+                    and old_entry is not None
+                    and (
+                        old_entry.file_id != new_entry.file_id
+                        or old_entry.content_hash != new_entry.content_hash
+                    )
+                ):
+                    fs.event_emitter.emit_file_update(updated_ref, old_entry, new_entry)
         except Exception as e:
             flush_failed = True
             logger.error(f"Failed to flush blobs for {path}: {e}", exc_info=True)

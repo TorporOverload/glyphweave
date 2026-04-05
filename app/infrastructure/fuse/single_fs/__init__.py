@@ -52,6 +52,7 @@ class SingleFileFS(Operations):
         key_service: KeyService,
         vault_id: bytes,
         session_factory: sessionmaker,
+        event_emitter=None,
         master_key: bytes | None = None,
         chunk_size: int = FUSE_CHUNK_SIZE,
     ):
@@ -81,6 +82,7 @@ class SingleFileFS(Operations):
         )
 
         self._session_factory = session_factory
+        self.event_emitter = event_emitter
         bundle = build_fuse_services(
             session_factory=session_factory,
             vault_path=vault_path,

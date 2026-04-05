@@ -65,6 +65,16 @@ def upsert_registry(
     save_registry(entries, app_data_dir)
 
 
+def remove_registry_entry(vault_id: str, app_data_dir: Path | None = None) -> bool:
+    """Remove a vault entry from the local registry by vault ID."""
+    entries = load_registry(app_data_dir)
+    filtered = [entry for entry in entries if entry.get("vault_id") != vault_id]
+    if len(filtered) == len(entries):
+        return False
+    save_registry(filtered, app_data_dir)
+    return True
+
+
 def write_vault_metadata(vault_dir: Path, vault_id: str, name: str) -> None:
     """Write vault identity metadata to the vault directory."""
     meta = {

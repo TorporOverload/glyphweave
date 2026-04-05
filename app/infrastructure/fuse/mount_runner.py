@@ -37,6 +37,7 @@ from app.infrastructure.persistence.db_dump_service import (
     install_db_dump_hook,
 )
 from app.common.paths.vault_layout import vault_key_path
+from app.services.sync.event_emitter import EventEmitter
 
 
 def _parse_args() -> argparse.Namespace:
@@ -127,6 +128,12 @@ def main() -> int:
         app_data_dir=vaults_data_dir.parent,
         event_store=event_store,
     )
+    event_emitter = EventEmitter(
+        store=event_store,
+        app_data_dir=vaults_data_dir.parent,
+        session_factory=session_factory,
+        local_data_path=vaults_data_dir / args.vault_id,
+    )
     try:
         file_service = FileService(session_factory)
 
@@ -152,6 +159,7 @@ def main() -> int:
             key_service=key_service,
             vault_id=args.vault_id.encode("utf-8"),
             session_factory=session_factory,
+            event_emitter=event_emitter,
         )
 
         fuse_kwargs: dict = {
