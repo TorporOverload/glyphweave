@@ -23,6 +23,10 @@ def setup_vault(cli: Any) -> bool:
                 return True
             continue
 
+        if choice == "96":
+            delete_local_vault_record_interactive(cli, known)
+            continue
+
         if choice == "97":
             if import_vault_interactive(cli):
                 return True
@@ -53,6 +57,44 @@ def setup_vault(cli: Any) -> bool:
                     continue
 
         print("Invalid selection. Please try again.\n")
+
+
+def delete_local_vault_record_interactive(cli: Any, known_vaults: list[dict]) -> None:
+    print("\n=== Delete Local Vault Record ===\n")
+    if not known_vaults:
+        print("No known vaults to delete locally.")
+        return
+
+    cli._print_lines(render_known_vault_lines(known_vaults))
+    selection = input(
+        "\nSelect vault number to remove from local .glyphweave state: "
+    ).strip()
+    if not selection.isdigit():
+        print("Invalid selection.")
+        return
+
+    index = int(selection) - 1
+    if not (0 <= index < len(known_vaults)):
+        print("Invalid selection.")
+        return
+
+    selected = known_vaults[index]
+    print("\nThis only deletes local GlyphWeave data:")
+    print("  - removes the vault from vaults.json")
+    print("  - deletes local cache/DB under .glyphweave/vaults/<vault_id>")
+    print("  - does NOT delete the actual vault directory")
+    print(f"Vault path remains: {selected['path']}")
+
+    confirm = input("Type DELETE LOCAL to confirm: ").strip()
+    if confirm != "DELETE LOCAL":
+        print("Cancelled.")
+        return
+
+    removed = cli.service.delete_local_vault_record(str(selected["vault_id"]))
+    if removed:
+        print(f"Removed local record for {selected.get('vault_alias') or selected['vault_id']}.")
+    else:
+        print("Vault was not present in the local registry.")
 
 
 def prompt_new_password() -> str:

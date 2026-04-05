@@ -4,7 +4,7 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from app.common.device_id import load_device_id
+from app.common.device_id import default_frontier_alias, load_device_id
 from app.common.logging import logger
 from app.infrastructure.persistence.event_store import EventStore
 from app.core.domain.sync.event_types import EventType
@@ -29,6 +29,7 @@ class EventEmitter:
         local_data_path: Path | None = None,
     ) -> None:
         self._store = store
+        self._app_data_dir = app_data_dir
         self._device_id = load_device_id(app_data_dir)
         self._clock = HLCClock(device_id=self._device_id)
         self._session_factory = session_factory
@@ -245,9 +246,21 @@ class EventEmitter:
             payload=payload,
             parents=frontier,
         )
-        stored = self._store.append_event(event)
+        stored = self._store.append_event(
+            event,
+            frontier_alias=self._current_frontier_alias(),
+        )
         self._process_local_event(stored)
         return stored
+
+    def _current_frontier_alias(self) -> str:
+        try:
+            alias = str(
+                self._store.read_frontier_record(self._device_id).get("alias") or ""
+            ).strip()
+        except Exception:
+            alias = ""
+        return alias or default_frontier_alias(self._app_data_dir, self._device_id)
 
     def _next_hlc(self) -> HybridLogicalClock:
         wall_time, logical, device_id = self._clock.next()

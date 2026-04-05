@@ -4,12 +4,21 @@ from pathlib import Path
 
 from app.common.config import ensure_app_data_layout, get_app_data_dir
 from app.infrastructure.crypto.types import KDFParams
+from app.services.vault_integrity_service import VaultIntegrityReport, VaultIntegrityService
 from app.services.vault_files.vault_file_service import VaultFileService
 from app.services.models import VaultContext
 from app.services.runtime.vault_runtime_service import VaultRuntimeService
 
 
 class VaultService:
+    _UNSAFE_REPAIR_CODES = {
+        "blocked_event",
+        "blob_hash_mismatch",
+        "corrupt_blob",
+        "corrupt_event",
+        "missing_blob",
+    }
+
     def __init__(self, app_data_dir: Path | None = None):
         base_dir = app_data_dir or get_app_data_dir()
         ensure_app_data_layout(base_dir)
@@ -35,6 +44,10 @@ class VaultService:
     def load_known_vaults(self) -> list[dict]:
         """Return all vaults recorded in the local registry."""
         return self.runtime.load_known_vaults()
+
+    def delete_local_vault_record(self, vault_id: str) -> bool:
+        """Remove a vault from local .glyphweave state without touching the vault."""
+        return self.runtime.delete_local_vault_record(vault_id)
 
     def prepare_existing_vault(
         self,
@@ -204,9 +217,36 @@ class VaultService:
         """Return the vault's recovery phrase."""
         return self.files.get_recovery_phrase()
 
-    def cleanup(self) -> None:
+    def check_integrity(self) -> VaultIntegrityReport:
+        """Rebuild vault state from events and compare it to the current DB."""
+        return VaultIntegrityService(self.context).check()
+
+    def repair_local_state(
+        self,
+        report: VaultIntegrityReport | None = None,
+    ) -> VaultIntegrityReport:
+        """Rebuild local runtime state when the vault data itself appears intact."""
+        baseline = report or self.check_integrity()
+        unsafe_codes = sorted(
+            {
+                issue.code
+                for issue in baseline.issues
+                if issue.code in self._UNSAFE_REPAIR_CODES
+            }
+        )
+        if unsafe_codes:
+            raise RuntimeError(
+                "Automatic repair is unsafe while vault data is corrupted: "
+                + ", ".join(unsafe_codes)
+            )
+
+        self.cleanup(flush_db_dump=False)
+        self.runtime.rebuild_local_runtime_state()
+        return self.check_integrity()
+
+    def cleanup(self, *, flush_db_dump: bool = True) -> None:
         """Finalize all open files and release vault resources."""
-        self.files.cleanup()
+        self.files.cleanup(flush_db_dump=flush_db_dump)
 
 
 __all__ = ["VaultService"]

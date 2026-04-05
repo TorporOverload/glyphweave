@@ -54,7 +54,7 @@ def unmount_unlocked(service, file_ref_id: int) -> str:
     )
 
 
-def cleanup(service) -> None:
+def cleanup(service, *, flush_db_dump: bool = True) -> None:
     runtime = service.context.event_replay_runtime
     if runtime is not None:
         runtime.stop()
@@ -67,5 +67,5 @@ def cleanup(service) -> None:
         encryption_service=service._require_encryption_service(),
     )
     session_factory = service.context.session_factory
-    if session_factory is not None:
+    if flush_db_dump and session_factory is not None:
         flush_db_dump_hook(session_factory)

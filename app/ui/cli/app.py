@@ -52,11 +52,20 @@ class VaultCLI:
     def show_recovery_phrase(self) -> None:
         browse_actions.show_recovery_phrase(self)
 
+    def check_vault_integrity(self) -> None:
+        manage_actions.check_vault_integrity(self)
+
+    def repair_local_state(self) -> None:
+        manage_actions.repair_local_state(self)
+
     def manage_entries(self) -> None:
         manage_actions.manage_entries(self)
 
     def manage_sync_conflicts(self) -> None:
         conflict_actions.manage_sync_conflicts(self)
+
+    def manage_device_aliases(self) -> None:
+        manage_actions.manage_device_aliases(self)
 
     def copy_entry(self) -> None:
         manage_actions.copy_entry(self)

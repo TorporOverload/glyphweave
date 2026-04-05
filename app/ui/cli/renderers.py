@@ -8,6 +8,7 @@ def render_setup_vault_lines(known_vaults: list[dict]) -> list[str]:
     lines = render_known_vault_lines(known_vaults)
     lines.extend(
         [
+            "  96. Delete local vault record",
             "  97. Import existing vault",
             "  98. Recover vault with recovery phrase",
             "  99. Create new vault",
@@ -100,7 +101,10 @@ def render_vault_menu_lines(vault_name: str | None) -> list[str]:
         "7. Show recovery phrase",
         "8. Show DB key (debug)",
         "9. Manage sync conflicts",
-        "10. Exit",
+        "10. Manage device aliases",
+        "11. Check vault integrity",
+        "12. Repair local state from events",
+        "13. Exit",
         "=" * 40,
     ]
 

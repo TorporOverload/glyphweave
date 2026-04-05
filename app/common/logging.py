@@ -118,7 +118,8 @@ def setup_logging() -> logging.Logger:
     if not is_event_encryption_enabled():
         warning = (
             "WARNING: GlyphWeave event encryption is disabled via "
-            "GLYPHWEAVE_EVENT_ENCRYPTION. Event objects will be written in plaintext."
+            "GLYPHWEAVE_EVENT_ENCRYPTION. Event objects and frontier files "
+            "will be written in plaintext."
         )
         print(warning, file=_build_console_stream())
         if DEBUG_ENABLED:

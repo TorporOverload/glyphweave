@@ -256,5 +256,5 @@ class VaultFileService:
     def unmount_unlocked(self, file_ref_id: int) -> str:
         return access.unmount_unlocked(self, file_ref_id)
 
-    def cleanup(self) -> None:
-        access.cleanup(self)
+    def cleanup(self, *, flush_db_dump: bool = True) -> None:
+        access.cleanup(self, flush_db_dump=flush_db_dump)

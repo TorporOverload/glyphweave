@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import uuid
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from app.common.paths.vault_layout import (
 
 from app.infrastructure.persistence.registry_service import (
     load_registry,
+    remove_registry_entry,
     upsert_registry,
     write_vault_metadata,
 )
@@ -23,6 +25,7 @@ from .vault_runtime_state import (
     assign_vault_location,
     attach_unlocked_key_service,
     ensure_local_runtime_dirs,
+    local_data_path_for,
     prepare_existing_vault_context,
 )
 
@@ -34,6 +37,13 @@ class VaultRuntimeService:
     def load_known_vaults(self) -> list[dict]:
         """Return the list of all registered vaults from the registry."""
         return load_registry(self.context.app_data_dir)
+
+    def delete_local_vault_record(self, vault_id: str) -> bool:
+        """Remove one vault from the local registry and delete its local runtime data."""
+        removed = remove_registry_entry(vault_id, self.context.app_data_dir)
+        local_data_path = self.context.app_data_dir / "vaults" / vault_id
+        shutil.rmtree(local_data_path, ignore_errors=True)
+        return removed
 
     def prepare_existing_vault(
         self,
@@ -202,3 +212,29 @@ class VaultRuntimeService:
     def _init_services(self) -> None:
         """Bootstrap all runtime services for the currently loaded vault context."""
         bootstrap_runtime_services(self.context)
+
+    def rebuild_local_runtime_state(self) -> None:
+        """Recreate local runtime data for the currently unlocked vault."""
+        vault_id = self.context.require_vault_id()
+        local_data_path = self.context.local_data_path or local_data_path_for(
+            self.context.app_data_dir,
+            vault_id,
+        )
+        db = self.context.db
+        if db is not None:
+            db.engine.dispose()
+        shutil.rmtree(local_data_path, ignore_errors=True)
+        self.context.local_data_path = local_data_path
+        ensure_local_runtime_dirs(local_data_path)
+
+        self.context.db = None
+        self.context.db_key_hex = None
+        self.context.session_factory = None
+        self.context.file_service = None
+        self.context.folder_service = None
+        self.context.mounts = None
+        self.context.event_store = None
+        self.context.event_emitter = None
+        self.context.event_replay_runtime = None
+
+        self._init_services()
