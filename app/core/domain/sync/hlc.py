@@ -69,9 +69,8 @@ class HLCClock:
             self.logical += 1
         else:
             self.wall_time = remote_wall_time
-            self.logical = remote_logical + 1
+            self.logical = 0
 
-        self.wall_time = max_wall_time
         return (self.wall_time, self.logical, self.device_id)
 
     def to_hlc(self) -> dict[str, Any]:

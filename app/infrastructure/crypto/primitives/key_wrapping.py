@@ -3,9 +3,7 @@
 from cryptography.hazmat.primitives.keywrap import (
     InvalidUnwrap,
     aes_key_unwrap,
-    aes_key_unwrap_with_padding,
     aes_key_wrap,
-    aes_key_wrap_with_padding,
 )
 
 from app.infrastructure.crypto.types import KeyMaterial
@@ -19,6 +17,7 @@ def _key_to_bytes(value: KeyMaterial) -> bytes:
         return value
     if isinstance(value, (bytearray, memoryview)):
         return bytes(value)
+    raise TypeError(f"Unsupported key material type: {type(value).__name__}")
 
 
 @timed_operation("wrap_key")
@@ -35,11 +34,7 @@ def wrap_key(key_encryption_key: KeyMaterial, key_to_wrap: KeyMaterial) -> bytes
     logger.debug("Wrapping key with AES Key Wrap.")
     normalized_kek = _key_to_bytes(key_encryption_key)
     normalized_key = _key_to_bytes(key_to_wrap)
-
-    if len(normalized_key) % 8 == 0:
-        wrapped = aes_key_wrap(normalized_kek, normalized_key)
-    else:
-        wrapped = aes_key_wrap_with_padding(normalized_kek, normalized_key)
+    wrapped = aes_key_wrap(normalized_kek, normalized_key)
     logger.debug("Key wrapped successfully.")
     return wrapped
 
@@ -68,18 +63,11 @@ def unwrap_key(key_encryption_key: KeyMaterial, wrapped_key: KeyMaterial) -> byt
         logger.debug("Key unwrapped successfully.")
         return key
     except InvalidUnwrap:
-        try:
-            key = aes_key_unwrap_with_padding(
-                normalized_kek, normalized_wrapped_key
-            )
-            logger.debug("Key unwrapped successfully.")
-            return key
-        except InvalidUnwrap:
-            logger.error(
-                "Failed to unwrap key:"
-                " Invalid key encryption key or corrupted wrapped key."
-            )
-            raise InvalidPasswordError(
-                "Invalid key encryption key or corrupted wrapped key"
-            )
+        logger.error(
+            "Failed to unwrap key:"
+            " Invalid key encryption key or corrupted wrapped key."
+        )
+        raise InvalidPasswordError(
+            "Invalid key encryption key or corrupted wrapped key"
+        )
 

@@ -262,3 +262,8 @@ class SecureMemory:
         except Exception as e:
             logger.warning(f"Error in __del__ SecureMemory : {e}")
 
+
+def secure_zero(data: bytearray) -> None:
+    """Overwrite a mutable buffer with zeros."""
+    SecureMemory.secure_zero(data)
+

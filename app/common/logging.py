@@ -57,7 +57,7 @@ def _build_console_stream():
             reconfigure(errors="backslashreplace")
             return stream
         except Exception as e:
-            print(f"Error building coonsole stream: {e}")
+            print(f"Error building console stream: {e}")
             pass
 
     return _SafeConsoleStream(stream)

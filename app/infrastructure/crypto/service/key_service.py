@@ -9,7 +9,7 @@ from app.infrastructure.crypto.primitives.key_derivation import (
     derive_subkey,
 )
 from app.infrastructure.crypto.primitives.key_wrapping import unwrap_key, wrap_key
-from app.infrastructure.crypto.primitives.secure_memory import SecureMemory
+from app.infrastructure.crypto.primitives.secure_memory import SecureMemory, secure_zero
 from app.infrastructure.crypto.types import (
     KDFParams,
     KeyPurpose,
@@ -34,7 +34,9 @@ class KeyService:
         Generate a secure random master key.
         """
         logger.debug("Generating new master key.")
-        self.master_key = SecureMemory(secrets.token_bytes(MASTER_KEY_SIZE))
+        self.master_key = SecureMemory.consume_mutable(
+            bytearray(secrets.token_bytes(MASTER_KEY_SIZE))
+        )
 
     @timed_operation("wrap_master_key")
     def wrap_master_key(self, password: str, kdf_params: KDFParams) -> None:
@@ -48,27 +50,28 @@ class KeyService:
         """
 
         logger.debug("Wrapping master key.")
-        kek_password, salt = derive_kek_from_password(password, kdf_params)
-
-        check_nonce = secrets.token_bytes(16)
-        cipher = AESGCM(kek_password)
-        check_cipher = cipher.encrypt(
-            check_nonce, CHECK_PLAINTEXT, associated_data=None
-        )
-
         if not self.master_key:
             logger.error("Master key is not initialized.")
             raise ValueError("Master key is not initialized.")
 
-        # Wrap master key using AES Key Wrap
-        wrapped_key = wrap_key(kek_password, self.master_key.view())
+        kek_password, salt = derive_kek_from_password(password, kdf_params)
+        try:
+            check_nonce = secrets.token_bytes(16)
+            cipher = AESGCM(bytes(kek_password))
+            check_cipher = cipher.encrypt(
+                check_nonce, CHECK_PLAINTEXT, associated_data=None
+            )
 
-        # Store in vault_key_file
-        self.vault_key_file.password_wrapped = WrappedKey(
-            ciphertext=wrapped_key, salt=salt, kdf_params=kdf_params
-        )
-        self.vault_key_file.check_nonce = check_nonce
-        self.vault_key_file.check_value = check_cipher
+            wrapped_key = wrap_key(kek_password, self.master_key.view())
+
+            #Store in vault_key_file
+            self.vault_key_file.password_wrapped = WrappedKey(
+                ciphertext=wrapped_key, salt=salt, kdf_params=kdf_params
+            )
+            self.vault_key_file.check_nonce = check_nonce
+            self.vault_key_file.check_value = check_cipher
+        finally:
+            secure_zero(kek_password)
 
         logger.debug("Master key wrapped successfully.")
 
@@ -91,20 +94,22 @@ class KeyService:
         kek_password, _ = derive_kek_from_password(
             password, wrapped_key.kdf_params, salt=wrapped_key.salt
         )
-
-        cipher = AESGCM(kek_password)
         try:
-            cipher.decrypt(
-                self.vault_key_file.check_nonce,
-                self.vault_key_file.check_value,
-                associated_data=None,
-            )
-        except Exception as e:
-            logger.error(f"Failed to decrypt check value: {e}")
-            raise InvalidPasswordError("Incorrect password/recovery key")
+            cipher = AESGCM(bytes(kek_password))
+            try:
+                cipher.decrypt(
+                    self.vault_key_file.check_nonce,
+                    self.vault_key_file.check_value,
+                    associated_data=None,
+                )
+            except Exception as exc:
+                logger.debug("Check-value decryption failed", exc_info=True)
+                raise InvalidPasswordError("Incorrect password/recovery key") from exc
 
-        # Unwrap master key using AES Key Wrap
-        self.master_key = SecureMemory(unwrap_key(kek_password, wrapped_key.ciphertext))
+            master_key = bytearray(unwrap_key(kek_password, wrapped_key.ciphertext))
+            self.master_key = SecureMemory.consume_mutable(master_key)
+        finally:
+            secure_zero(kek_password)
         logger.debug("Master key unwrapped successfully.")
 
     # Recovery key Operations
@@ -136,18 +141,18 @@ class KeyService:
         # Derive recovery key from recovery phrase
         recovery_seed = Mnemonic("english").to_seed(recovery_phrase)[:32]
         kek_recovery, salt = derive_kek_from_password(recovery_seed.hex(), kdf_params)
+        try:
+            if not self.master_key:
+                logger.error("Master key is not initialized.")
+                raise ValueError("Master key is not initialized.")
 
-        if not self.master_key:
-            logger.error("Master key is not initialized.")
-            raise ValueError("Master key is not initialized.")
+            wrapped_key = wrap_key(kek_recovery, self.master_key.view())
 
-        # Wrap master key using AES Key Wrap
-        wrapped_key = wrap_key(kek_recovery, self.master_key.view())
-
-        # Store in vault_key_file
-        self.vault_key_file.recovery_wrapped = WrappedKey(
-            ciphertext=wrapped_key, salt=salt, kdf_params=kdf_params
-        )
+            self.vault_key_file.recovery_wrapped = WrappedKey(
+                ciphertext=wrapped_key, salt=salt, kdf_params=kdf_params
+            )
+        finally:
+            secure_zero(kek_recovery)
 
         logger.debug("Master key wrapped with recovery phrase successfully.")
 
@@ -177,23 +182,28 @@ class KeyService:
         )
 
         try:
-            # Unwrap master key using AES Key Wrap
-            self.master_key = SecureMemory(
-                unwrap_key(kek_recovery, wrapped_key.ciphertext)
-            )
+            master_key = bytearray(unwrap_key(kek_recovery, wrapped_key.ciphertext))
+            self.master_key = SecureMemory.consume_mutable(master_key)
             logger.info("Master key recovered from recovery phrase.")
-        except Exception as e:
-            logger.error(f"Failed to recover key from phrase: {e}")
-            raise ValueError(f"Failed to recover key from phrase: {e}") from e
+        except InvalidPasswordError:
+            raise
+        except Exception as exc:
+            logger.debug("Recovery key unwrap failed", exc_info=True)
+            raise ValueError("Failed to recover key from phrase") from exc
+        finally:
+            secure_zero(kek_recovery)
 
     def wrap_recovery_phrase_with_master(self, recovery_phrase: str) -> None:
         """Store a master-key-wrapped copy of the recovery phrase."""
         if not self.master_key:
             logger.error("Master key is not initialized.")
             raise ValueError("Master key is not initialized.")
+        if not self.validate_recovery_phrase(recovery_phrase):
+            raise ValueError("Invalid recovery phrase format")
 
+        recovery_entropy = Mnemonic("english").to_entropy(recovery_phrase)
         self.vault_key_file.recovery_phrase_wrapped = wrap_key(
-            self.master_key.view(), recovery_phrase.encode("utf-8")
+            self.master_key.view(), recovery_entropy
         )
 
     def unwrap_recovery_phrase_with_master(self) -> str:
@@ -204,10 +214,10 @@ class KeyService:
         if not self.vault_key_file.recovery_phrase_wrapped:
             raise ValueError("Recovery phrase is not available for this vault")
 
-        phrase_bytes = unwrap_key(
+        phrase_entropy = unwrap_key(
             self.master_key.view(), self.vault_key_file.recovery_phrase_wrapped
         )
-        return phrase_bytes.decode("utf-8")
+        return Mnemonic("english").to_mnemonic(phrase_entropy)
 
     def derive_database_key(self) -> str:
         """Derives the vault db key for sqlcipher database.
@@ -227,7 +237,7 @@ class KeyService:
         logger.debug("Database key derived successfully.")
         return db_key.hex()
 
-    def derive_sub_key(self, purpose: KeyPurpose, context: str) -> bytes:
+    def derive_sub_key(self, purpose: KeyPurpose, context: str) -> bytearray:
         """Derives a subkey for a given purpose and context.
 
         Args:
@@ -235,7 +245,7 @@ class KeyService:
             context (str): The context for the subkey (id of the file, etc...).
 
         Returns:
-            bytes: The derived subkey.
+            bytearray: The derived subkey.
         """
         if not self.master_key:
             logger.error("Master key is not initialized.")
@@ -247,7 +257,7 @@ class KeyService:
             purpose,
             context,
         )
-        logger.debug(f"subkey derived for {purpose} :: {context} successfully.")
+        logger.debug("Subkey derived for %s successfully.", purpose)
         return file_key
 
     @staticmethod
@@ -263,13 +273,7 @@ class KeyService:
         """
         logger.debug("Validating recovery phrase format.")
         try:
-            words = phrase.strip().split()
-
-            if len(words) != 24:
-                logger.warning(f"Invalid recovery phrase word count: {len(words)}")
-                return False
-            logger.debug("Recovery phrase format is valid.")
-            return True
+            return Mnemonic("english").check(phrase)
         except Exception as e:
             logger.error(f"Error validating recovery phrase: {e}")
             return False

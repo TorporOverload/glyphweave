@@ -33,7 +33,14 @@ def writable_blobs_dir(vault_path: Path) -> Path:
 
 def resolve_blob_path(vault_path: Path, blob_id: str) -> Path:
     """Return the full filesystem path for a blob given its ID."""
-    return blobs_dir(vault_path) / blob_id
+    safe_id = Path(blob_id).name
+    if safe_id != blob_id:
+        raise ValueError("Invalid blob_id")
+    base_dir = blobs_dir(vault_path).resolve()
+    resolved = (base_dir / safe_id).resolve()
+    if not resolved.is_relative_to(base_dir):
+        raise ValueError("Blob path escapes vault directory")
+    return resolved
 
 def create_vault_layout(vault_path: Path) -> None:
     """Create all required vault subdirectories if they do not already exist."""

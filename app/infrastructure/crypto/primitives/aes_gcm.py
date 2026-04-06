@@ -9,6 +9,7 @@ from app.infrastructure.crypto.constants import (
     NONCE_SIZE,
 )
 from app.infrastructure.crypto.primitives.key_derivation import derive_subkey
+from app.infrastructure.crypto.primitives.secure_memory import secure_zero
 from app.infrastructure.crypto.types import KeyMaterial, KeyPurpose
 
 
@@ -35,14 +36,17 @@ def encrypt_event_bytes(
     version: int,
 ) -> tuple[bytes, bytes]:
     key = derive_subkey(master_key, vault_id, KeyPurpose.EVENT, event_hash)
-    nonce = secrets.token_bytes(NONCE_SIZE)
-    aad = build_event_aad(
-        event_hash=event_hash,
-        version=version,
-        device_id=device_id,
-    )
-    ciphertext = AESGCM(key).encrypt(nonce, plaintext, aad)
-    return nonce, ciphertext
+    try:
+        nonce = secrets.token_bytes(NONCE_SIZE)
+        aad = build_event_aad(
+            event_hash=event_hash,
+            version=version,
+            device_id=device_id,
+        )
+        ciphertext = AESGCM(bytes(key)).encrypt(nonce, plaintext, aad)
+        return nonce, ciphertext
+    finally:
+        secure_zero(key)
 
 
 def decrypt_event_bytes(
@@ -56,17 +60,20 @@ def decrypt_event_bytes(
     version: int,
 ) -> bytes:
     key = derive_subkey(master_key, vault_id, KeyPurpose.EVENT, event_hash)
-    aad = build_event_aad(
-        event_hash=event_hash,
-        version=version,
-        device_id=device_id,
-    )
-    return AESGCM(key).decrypt(nonce, ciphertext, aad)
+    try:
+        aad = build_event_aad(
+            event_hash=event_hash,
+            version=version,
+            device_id=device_id,
+        )
+        return AESGCM(bytes(key)).decrypt(nonce, ciphertext, aad)
+    finally:
+        secure_zero(key)
 
 
 class AESGCMCipher:
-    def __init__(self, key: bytes):
-        self.cipher = AESGCM(key)
+    def __init__(self, key: KeyMaterial):
+        self.cipher = AESGCM(bytes(key))
 
     def encrypt_header(self, header_data: bytes, file_id: str) -> bytes:
         """

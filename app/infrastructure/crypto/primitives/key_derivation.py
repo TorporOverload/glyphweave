@@ -27,10 +27,9 @@ HKDF_INFO_MAP = {
 }
 
 
-@timed_operation("derive_kek_from_password")
 def derive_kek_from_password(
     password: str, kdf_params: KDFParams, salt: bytes | None = None
-) -> tuple[bytes, bytes]:
+) -> tuple[bytearray, bytes]:
     """
     Derive a Key Encryption Key (KEK) from a password using Argon2id.
 
@@ -56,18 +55,18 @@ def derive_kek_from_password(
         memory_cost=kdf_params.memory_kb,
     )
     try:
-        key = kdf.derive(password.encode("utf-8"))
+        key = bytearray(kdf.derive(password.encode("utf-8")))
         logger.debug("Key derived successfully from password.")
         return key, salt
-    except (AlreadyFinalized, ValueError) as e:
-        logger.error(f"Key derivation failed: {e}")
-        raise KeyDerivationError(f"Key derivation failed: {e}") from e
+    except Exception:
+        logger.debug("Key derivation failed", exc_info=True)
+        raise KeyDerivationError("Key derivation failed")
 
 
 @timed_operation("derive_subkey")
 def derive_subkey(
     master_key: KeyMaterial, vault_id: bytes, purpose: KeyPurpose, context: str
-) -> bytes:
+) -> bytearray:
     """
     Derive a purpose-specific subkey from a master key using HKDF.
 
@@ -96,5 +95,5 @@ def derive_subkey(
         info=info,
     )
 
-    return hkdf_instance.derive(master_key)
+    return bytearray(hkdf_instance.derive(master_key))
 
