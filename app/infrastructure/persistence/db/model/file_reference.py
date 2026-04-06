@@ -13,12 +13,14 @@ from sqlalchemy import (
     String,
     event,
     func,
+    literal,
     update,
 )
 from sqlalchemy.orm import Mapped, Relationship, mapped_column, relationship
 from sqlalchemy.orm.attributes import get_history
 
 from app.infrastructure.persistence.db.base_model import Base
+from app.infrastructure.persistence.db.utils import escape_like_pattern
 
 if TYPE_CHECKING:
     from app.infrastructure.persistence.db.model.file_entry import FileEntry
@@ -89,7 +91,7 @@ class FileReference(Base):
         return f"{parent_path}/{self.name}"
 
 
-from app.infrastructure.persistence.db.utils import escape_like_pattern as _escape_like_pattern
+
 
 
 @event.listens_for(FileReference, "before_insert")
@@ -121,13 +123,16 @@ def propagate_path_to_children(mapper, connection, target: FileReference) -> Non
             update(FileReference)
             .where(
                 FileReference.virtual_path.like(
-                    _escape_like_pattern(old_path) + "/%",
+                    escape_like_pattern(old_path) + "/%",
                     escape="\\",
                 )
             )
             .values(
                 virtual_path=new_path
-                + func.substr(FileReference.virtual_path, len(old_path) + 1)
+                + func.substr(
+                    FileReference.virtual_path,
+                    func.length(literal(old_path)) + 1,
+                )
             )
         )
 

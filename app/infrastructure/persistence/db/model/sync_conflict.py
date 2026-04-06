@@ -31,12 +31,12 @@ class SyncConflict(Base):
 
     archived_file_ref_id: Mapped[int | None] = mapped_column(
         Integer,
-        ForeignKey("file_reference.id"),
+        ForeignKey("file_reference.id", ondelete="SET NULL"),
         nullable=True,
     )
     file_entry_id: Mapped[int | None] = mapped_column(
         Integer,
-        ForeignKey("file_entry.id"),
+        ForeignKey("file_entry.id", ondelete="SET NULL"),
         nullable=True,
     )
     archived_name: Mapped[str] = mapped_column(String, nullable=False)

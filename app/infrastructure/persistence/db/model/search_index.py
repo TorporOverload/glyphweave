@@ -31,11 +31,11 @@ CREATE TRIGGER IF NOT EXISTS trigger_delete_search_index AFTER DELETE ON file_en
 trigger_search_filename_index_insert = DDL("""
 CREATE TRIGGER IF NOT EXISTS trigger_insert_search_filename_index
     AFTER INSERT ON file_reference
-    FOR EACH ROW
-        BEGIN
-            INSERT INTO search_filename_index (file_ref_id, file_name)
-            VALUES (NEW.id, NEW.name);
-        END;
+    WHEN NEW.is_folder = 0
+    BEGIN
+        INSERT INTO search_filename_index (file_ref_id, file_name)
+        VALUES (NEW.id, NEW.name);
+    END;
 """)
 
 trigger_search_filename_index_delete = DDL("""
@@ -50,19 +50,20 @@ CREATE TRIGGER IF NOT EXISTS trigger_delete_search_filename_index
 trigger_search_filename_index_update = DDL("""
 CREATE TRIGGER IF NOT EXISTS trigger_update_search_filename_index
     AFTER UPDATE OF name ON file_reference
-    FOR EACH ROW
-        BEGIN
-            DELETE FROM search_filename_index WHERE file_ref_id = OLD.id;
-            INSERT INTO search_filename_index (file_ref_id, file_name)
-            VALUES (NEW.id, NEW.name);
-        END;
+    WHEN NEW.is_folder = 0
+    BEGIN
+        DELETE FROM search_filename_index WHERE file_ref_id = OLD.id;
+        INSERT INTO search_filename_index (file_ref_id, file_name)
+        VALUES (NEW.id, NEW.name);
+    END;
 """)
 
 sync_search_filename_index = DDL("""
 INSERT INTO search_filename_index (file_ref_id, file_name)
 SELECT fr.id, fr.name
 FROM file_reference AS fr
-WHERE NOT EXISTS (
+WHERE fr.is_folder = 0
+  AND NOT EXISTS (
       SELECT 1
       FROM search_filename_index AS sfi
       WHERE sfi.file_ref_id = fr.id
@@ -72,17 +73,16 @@ WHERE NOT EXISTS (
 trigger_file_entry_content_changed = DDL(f"""
 CREATE TRIGGER IF NOT EXISTS trigger_file_entry_content_changed
     AFTER UPDATE OF content_hash ON file_entry
-    FOR EACH ROW
-        WHEN NEW.content_hash != OLD.content_hash
-        BEGIN
-            -- clear old FTS rows
-            DELETE FROM search_index WHERE file_entry_id = OLD.id;
+    WHEN NEW.content_hash != OLD.content_hash
+    BEGIN
+        -- clear old FTS rows
+        DELETE FROM search_index WHERE file_entry_id = OLD.id;
 
-            -- mark for reâ€‘extraction / reâ€‘index
-            UPDATE file_entry
-            SET text_extraction_status = '{ExtractionStatus.PENDING.value}'
-            WHERE id = NEW.id;
-        END;
+        -- mark for reâ€‘extraction / reâ€‘index
+        UPDATE file_entry
+        SET text_extraction_status = '{ExtractionStatus.PENDING.value}'
+        WHERE id = NEW.id;
+    END;
 """)  # noqa: S608
 
 
@@ -99,10 +99,23 @@ def register_ddl_listeners():
         _ddl_listeners_registered = True
 
         event.listen(Base.metadata, "after_create", create_search_index_table)
+
         event.listen(Base.metadata, "after_create", create_search_filename_index_table)
+
         event.listen(Base.metadata, "after_create", trigger_search_index_delete)
-        event.listen(Base.metadata, "after_create", trigger_search_filename_index_insert)
-        event.listen(Base.metadata, "after_create", trigger_search_filename_index_delete)
-        event.listen(Base.metadata, "after_create", trigger_search_filename_index_update)
+
+        event.listen(
+            Base.metadata, "after_create", trigger_search_filename_index_insert
+        )
+
+        event.listen(
+            Base.metadata, "after_create", trigger_search_filename_index_delete
+        )
+
+        event.listen(
+            Base.metadata, "after_create", trigger_search_filename_index_update
+        )
+
         event.listen(Base.metadata, "after_create", trigger_file_entry_content_changed)
+
         event.listen(Base.metadata, "after_create", sync_search_filename_index)

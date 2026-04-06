@@ -1,15 +1,12 @@
 from pathlib import Path
 
-from sqlalchemy import bindparam, delete, func, select, text
+from sqlalchemy import bindparam, func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.infrastructure.persistence.db.model.file_blob_reference import (
-    FileBlobReference,
-)
+from app.common.logging import logger
+from app.common.paths.vault_layout import resolve_blob_path, writable_blobs_dir
 from app.infrastructure.persistence.db.model.file_entry import FileEntry
 from app.infrastructure.persistence.db.service.session import session_scope
-from app.common.paths.vault_layout import writable_blobs_dir
-from app.common.logging import logger
 
 
 class GarbageCollector:
@@ -50,8 +47,12 @@ class GarbageCollector:
                 )
                 return False
 
-            self._cleanup_batch_in_session(session, [entry_id])
-            return True
+            deleted_count, blob_paths = self._cleanup_batch_in_session(
+                session, [entry_id]
+            )
+
+        self._delete_blob_paths(blob_paths)
+        return deleted_count > 0
 
     def cleanup_batch(self, orphan_ids: list[int]) -> int:
         """Cleans up a batch of orphaned entries in a single pass."""
@@ -59,15 +60,22 @@ class GarbageCollector:
             return 0
 
         with session_scope(self._session_factory) as session:
-            return self._cleanup_batch_in_session(session, orphan_ids)
+            deleted_count, blob_paths = self._cleanup_batch_in_session(
+                session, orphan_ids
+            )
 
-    def _cleanup_batch_in_session(self, session: Session, orphan_ids: list[int]) -> int:
+        self._delete_blob_paths(blob_paths)
+        return deleted_count
+
+    def _cleanup_batch_in_session(
+        self, session: Session, orphan_ids: list[int]
+    ) -> tuple[int, list[Path]]:
         """Internal batch cleanup using an existing session."""
         from app.infrastructure.persistence.db.model.file_reference import FileReference
 
         logger.debug(f"Cleaning up batch of {len(orphan_ids)} orphaned entries")
         if not orphan_ids:
-            return 0
+            return 0, []
 
         orphan_ids = sorted(set(orphan_ids))
         live_entry_ids = set(
@@ -89,28 +97,18 @@ class GarbageCollector:
                 f"Skipping cleanup for still-referenced file entries: {skipped_ids}"
             )
         if not removable_ids:
-            return 0
+            return 0, []
 
-        # Collect all blob IDs for these entries
-        blobs_to_delete = (
-            session.execute(
-                select(FileBlobReference.blob_id).where(
-                    FileBlobReference.file_entry_id.in_(removable_ids)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        blob_ids = list(blobs_to_delete)
-        logger.debug(f"Found {len(blob_ids)} blob references to delete")
-
-        # Delete Blob References
-        session.execute(
-            delete(FileBlobReference).where(
-                FileBlobReference.file_entry_id.in_(removable_ids)
-            )
-        )
-        logger.debug(f"Deleted blob references for {len(removable_ids)} entries")
+        blob_paths: list[Path] = []
+        for entry_id in removable_ids:
+            entry = session.get(FileEntry, entry_id)
+            if entry is None:
+                continue
+            for blob in entry.blobs:
+                blob_path = resolve_blob_path(self.vault_file_path.parent, blob.blob_id)
+                if blob_path.exists():
+                    blob_paths.append(blob_path)
+            session.delete(entry)
 
         # Delete Search Index (FTS5)
         try:
@@ -128,32 +126,19 @@ class GarbageCollector:
             # FTS5 table may not exist
             logger.debug(f"Skipping search_index cleanup: {e}")
 
-        # 3. Delete FileEntries
-        session.execute(delete(FileEntry).where(FileEntry.id.in_(removable_ids)))
-        logger.debug(f"Deleted {len(removable_ids)} file entries from database")
-
         session.flush()
-
-        # 4. Cleanup Disk
-        deleted_count = 0
-        for blob_id in blob_ids:
-            blob_path = self.vault_file_path / blob_id
-            try:
-                blob_path.unlink(missing_ok=True)
-                deleted_count += 1
-            except Exception as e:
-                logger.error(f"Failed to delete disk file {blob_id}: {e}")
-
         logger.info(
-            f"""Batch cleanup complete: {len(removable_ids)} entries.
-            {deleted_count}/{len(blob_ids)} blobs removed from disk"""
+            "Batch cleanup staged: %s entries, %s blob(s) pending disk deletion",
+            len(removable_ids),
+            len(blob_paths),
         )
-        return len(removable_ids)
+        return len(removable_ids), blob_paths
 
     def full_gc_sweep(self) -> int:
         """Perform a full garbage collection sweep."""
         logger.info("Starting full GC sweep")
 
+        all_blob_paths: list[Path] = []
         with session_scope(self._session_factory) as session:
             stmt = text("""
                 SELECT fe.id FROM file_entry fe
@@ -176,7 +161,27 @@ class GarbageCollector:
             chunk_size = 100
             for i in range(0, len(orphan_ids), chunk_size):
                 batch = orphan_ids[i : i + chunk_size]
-                total_cleaned += self._cleanup_batch_in_session(session, batch)
+                deleted_count, blob_paths = self._cleanup_batch_in_session(
+                    session, batch
+                )
+                total_cleaned += deleted_count
+                all_blob_paths.extend(blob_paths)
 
-            logger.info(f"GC sweep complete: {total_cleaned} entries cleaned")
-            return total_cleaned
+        self._delete_blob_paths(all_blob_paths)
+        logger.info(f"GC sweep complete: {total_cleaned} entries cleaned")
+        return total_cleaned
+
+    def _delete_blob_paths(self, blob_paths: list[Path]) -> None:
+        deleted_count = 0
+        for blob_path in blob_paths:
+            try:
+                blob_path.unlink(missing_ok=True)
+                deleted_count += 1
+            except OSError:
+                logger.warning("Failed to delete orphaned blob: %s", blob_path.name)
+        if blob_paths:
+            logger.info(
+                "Deleted %s/%s orphaned blob file(s) after commit",
+                deleted_count,
+                len(blob_paths),
+            )

@@ -175,7 +175,11 @@ def search_content(
         statement = SEARCH_CONTENT_DHIVEHI_VOWEL_STATEMENT
         params["exact_query"] = normalized
 
-    rows = session.execute(statement, params).fetchall()
+    try:
+        rows = session.execute(statement, params).fetchall()
+    except OperationalError:
+        logger.warning("Invalid FTS5 query syntax, returning empty results")
+        return []
     return [(str(row[0]), row[1] or "", float(row[2])) for row in rows]
 
 
@@ -189,15 +193,21 @@ def search_file_references(
     if not normalized:
         return []
 
-    rows = session.execute(
-        SEARCH_FILE_REFERENCES_STATEMENT,
-        {
-            "query": _prepare_filename_match_query(normalized),
-            "exact_query": normalized,
-            "limit": limit,
-            "use_dhivehi_exact_boost": int(_contains_dhivehi_vowel_signs(normalized)),
-        },
-    ).fetchall()
+    try:
+        rows = session.execute(
+            SEARCH_FILE_REFERENCES_STATEMENT,
+            {
+                "query": _prepare_filename_match_query(normalized),
+                "exact_query": normalized,
+                "limit": limit,
+                "use_dhivehi_exact_boost": int(
+                    _contains_dhivehi_vowel_signs(normalized)
+                ),
+            },
+        ).fetchall()
+    except OperationalError:
+        logger.warning("Invalid FTS5 query syntax, returning empty results")
+        return []
     return [(int(row[0]), row[1], row[2], float(row[5])) for row in rows]
 
 

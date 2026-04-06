@@ -18,9 +18,7 @@ class SyncTombstone(Base):
         String, nullable=False, unique=True, index=True
     )
     node_kind: Mapped[str] = mapped_column(String, nullable=False, index=True)
-    event_id: Mapped[str] = mapped_column(
-        String, nullable=False, unique=True, index=True
-    )
+    event_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     device_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     hlc_wall_time: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     hlc_logical: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -28,4 +26,3 @@ class SyncTombstone(Base):
     deleted_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc), index=True
     )
-

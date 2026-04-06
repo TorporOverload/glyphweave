@@ -4,12 +4,13 @@ from collections.abc import Iterable
 from datetime import datetime, timezone
 
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.infrastructure.persistence.db.model.sync_conflict import SyncConflict
 
 
 def upsert_sync_conflict(
-    session,
+    session: Session,
     *,
     conflict_id: str,
     node_id: str,
@@ -75,7 +76,9 @@ def upsert_sync_conflict(
     return conflict
 
 
-def get_active_sync_conflict_for_node(session, node_id: str) -> SyncConflict | None:
+def get_active_sync_conflict_for_node(
+    session: Session, node_id: str
+) -> SyncConflict | None:
     return session.scalar(
         select(SyncConflict)
         .where(SyncConflict.node_id == node_id, SyncConflict.status == "active")
@@ -83,13 +86,15 @@ def get_active_sync_conflict_for_node(session, node_id: str) -> SyncConflict | N
     )
 
 
-def get_sync_conflict_by_id(session, conflict_id: str) -> SyncConflict | None:
+def get_sync_conflict_by_id(
+    session: Session, conflict_id: str
+) -> SyncConflict | None:
     return session.scalar(
         select(SyncConflict).where(SyncConflict.conflict_id == conflict_id)
     )
 
 
-def list_active_sync_conflicts(session) -> list[SyncConflict]:
+def list_active_sync_conflicts(session: Session) -> list[SyncConflict]:
     return list(
         session.scalars(
             select(SyncConflict)
@@ -100,7 +105,7 @@ def list_active_sync_conflicts(session) -> list[SyncConflict]:
 
 
 def list_active_sync_conflicts_for_node_ids(
-    session,
+    session: Session,
     node_ids: Iterable[str],
 ) -> list[SyncConflict]:
     normalized_node_ids = sorted({str(node_id) for node_id in node_ids if node_id})
@@ -120,7 +125,7 @@ def list_active_sync_conflicts_for_node_ids(
 
 
 def resolve_sync_conflict(
-    session,
+    session: Session,
     *,
     conflict_id: str,
     resolution_event_id: str,
@@ -143,7 +148,7 @@ def resolve_sync_conflict(
 
 
 def resolve_active_sync_conflicts_for_node_ids(
-    session,
+    session: Session,
     *,
     node_ids: Iterable[str],
     resolution_event_id: str,

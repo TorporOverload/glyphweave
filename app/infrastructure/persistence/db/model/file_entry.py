@@ -52,5 +52,6 @@ class FileEntry(Base):
     blobs: Relationship[List["FileBlobReference"]] = relationship(
         "FileBlobReference",
         back_populates="file_entry",
+        cascade="all, delete-orphan",
         order_by="FileBlobReference.blob_index",
     )

@@ -12,6 +12,7 @@ import sqlcipher3
 from sqlalchemy import event
 
 from app.common.device_id import load_device_id, sanitize_device_id
+from app.common.atomic_write import atomic_write_text
 from app.infrastructure.persistence.event_store import EventStore
 from app.core.domain.sync.event_types import EventType
 from app.core.domain.sync.hlc import HLCClock, compare_hlc
@@ -80,8 +81,8 @@ def restore_latest_db_dump(
     source = sqlcipher3.connect(str(latest.dump_path))
     target = sqlcipher3.connect(str(db_path))
     try:
-        source.execute(f"PRAGMA key = \"x'{db_key_hex}'\"")
-        target.execute(f"PRAGMA key = \"x'{db_key_hex}'\"")
+        _apply_sqlcipher_key(source, db_key_hex, "restore source")
+        _apply_sqlcipher_key(target, db_key_hex, "restore target")
         source.backup(target, pages=256)
         target.commit()
     finally:
@@ -138,23 +139,24 @@ class DBDumpService:
 
     def maybe_create_dump(self) -> Path | None:
         """Create a new dump if the live DB size has changed by the threshold."""
-        if self._is_dumping or not self._db_path.exists():
-            return None
-
-        current_size = self._db_path.stat().st_size
-        dumps = self._list_dump_records()
-        if dumps:
-            latest_size = dumps[-1].db_size_bytes
-            if abs(current_size - latest_size) < self._threshold_bytes:
+        with self._schedule_lock:
+            if self._is_dumping or not self._db_path.exists():
                 return None
+            self._is_dumping = True
 
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-        dump_name = f"{self._device_id}-{timestamp}-db"
-        dump_path = self.dumps_dir / dump_name
-        event_path = self.events_dir / f"{dump_name}.json"
-
-        self._is_dumping = True
         try:
+            current_size = self._db_path.stat().st_size
+            dumps = self._list_dump_records()
+            if dumps:
+                latest_size = dumps[-1].db_size_bytes
+                if abs(current_size - latest_size) < self._threshold_bytes:
+                    return None
+
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+            dump_name = f"{self._device_id}-{timestamp}-db"
+            dump_path = self.dumps_dir / dump_name
+            event_path = self.events_dir / f"{dump_name}.json"
+
             self._backup_database_online(dump_path)
             current_size = self._db_path.stat().st_size
             event_payload = {
@@ -164,16 +166,17 @@ class DBDumpService:
                 "db_size_bytes": current_size,
                 "dump_name": dump_name,
             }
-            event_path.write_text(
+            atomic_write_text(
+                event_path,
                 json.dumps(event_payload, indent=2),
-                encoding="utf-8",
             )
             self._append_event_object(event_payload)
             self._trim_old_dumps()
             logger.info("Created DB dump at %s", dump_path)
             return dump_path
         finally:
-            self._is_dumping = False
+            with self._schedule_lock:
+                self._is_dumping = False
 
     def schedule_dump_check(self) -> None:
         """Debounce DB dump checks so commit bursts trigger a single size check."""
@@ -223,8 +226,8 @@ class DBDumpService:
         source = sqlcipher3.connect(str(self._db_path))
         target = sqlcipher3.connect(str(destination))
         try:
-            source.execute(f"PRAGMA key = \"x'{self._db_key_hex}'\"")
-            target.execute(f"PRAGMA key = \"x'{self._db_key_hex}'\"")
+            _apply_sqlcipher_key(source, self._db_key_hex, "backup source")
+            _apply_sqlcipher_key(target, self._db_key_hex, "backup target")
             source.backup(target, pages=256)
             target.commit()
         finally:
@@ -327,3 +330,20 @@ def flush_db_dump_hook(session_factory) -> None:
     service = getattr(session_factory, "_glyphweave_db_dump_service", None)
     if service is not None:
         service.flush_pending_dump_check()
+
+
+def _apply_sqlcipher_key(
+    connection: sqlcipher3.Connection,
+    db_key_hex: str,
+    context: str,
+) -> None:
+    cursor = connection.cursor()
+    try:
+        try:
+            cursor.execute(f"PRAGMA key = \"x'{db_key_hex}'\"")
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to set database encryption key during {context}"
+            ) from exc
+    finally:
+        cursor.close()

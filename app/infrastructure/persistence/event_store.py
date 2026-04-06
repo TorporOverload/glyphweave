@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-import json
 import base64
+import json
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from app.common.atomic_write import atomic_write_text
+from app.common.logging import logger
 from app.common.paths.vault_layout import EVENTS_DIR
-from app.core.domain.sync.hashing import canonical_json_bytes
-from app.core.domain.sync.hashing import hash_event
+from app.core.domain.sync.hashing import canonical_json_bytes, hash_event
 from app.core.domain.sync.models import DiscoveredEvent, VaultEvent
 from app.infrastructure.crypto.primitives.aes_gcm import (
     decrypt_event_bytes,
@@ -74,14 +75,14 @@ class EventStore:
         object_path = self.object_path(event_hash)
         object_path.parent.mkdir(parents=True, exist_ok=True)
         if not object_path.exists():
-            object_path.write_text(
+            atomic_write_text(
+                object_path,
                 json.dumps(
                     self._serialize_event_payload(stored, event_hash),
                     sort_keys=True,
                     indent=2,
                     ensure_ascii=False,
                 ),
-                encoding="utf-8",
             )
 
         alias = frontier_alias
@@ -171,7 +172,8 @@ class EventStore:
                 record = self._deserialize_frontier_payload(path.stem, payload)
             except (OSError, json.JSONDecodeError):
                 continue
-            except Exception:
+            except Exception as exc:
+                logger.warning(f"iter_frontier_hashes: {exc}")
                 continue
             for item in record.get("frontier", []):
                 if item:
@@ -197,9 +199,9 @@ class EventStore:
             device_id=device_id,
         )
         payload = self._serialize_frontier_payload(record)
-        path.write_text(
+        atomic_write_text(
+            path,
             json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False),
-            encoding="utf-8",
         )
 
     def write_frontier_alias(self, device_id: str, alias: str = "") -> None:
@@ -228,7 +230,9 @@ class EventStore:
             "device_id": str(payload.get("device_id") or device_id),
             "alias": str(payload.get("alias") or "").strip(),
             "frontier": [str(item) for item in payload.get("frontier", []) if item],
-            "updated_at": str(payload.get("updated_at")) if payload.get("updated_at") else None,
+            "updated_at": str(payload.get("updated_at"))
+            if payload.get("updated_at")
+            else None,
         }
 
     def _serialize_frontier_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -259,7 +263,10 @@ class EventStore:
         device_id: str,
         payload: dict[str, Any],
     ) -> dict[str, Any]:
-        if payload.get("kind") == FRONTIER_RECORD_KIND and payload.get("mode") == "encrypted":
+        if (
+            payload.get("kind") == FRONTIER_RECORD_KIND
+            and payload.get("mode") == "encrypted"
+        ):
             if self._config is None:
                 raise EventIntegrityError(
                     "Encrypted frontier record requires an initialized EventStoreConfig"
@@ -278,7 +285,8 @@ class EventStore:
             record = json.loads(plaintext.decode("utf-8"))
             if str(record.get("device_id") or envelope_device_id) != envelope_device_id:
                 raise EventIntegrityError(
-                    "Encrypted frontier record device_id does not match decrypted payload"
+                    "Encrypted frontier record device_id"
+                    " does not match decrypted payload"
                 )
             return record
 

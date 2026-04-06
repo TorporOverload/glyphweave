@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import sqlcipher3
 from sqlalchemy import create_engine, event
@@ -67,20 +68,26 @@ class DbBase:
         db_key: str,
         vaults_data_dir: Path | None = None,
     ):
-        self.db_key = db_key
         self.vaults_data_dir = Path(vaults_data_dir or get_vaults_data_dir())
         self.db_path = self.resolve_db_path(vault_id, self.vaults_data_dir)
         self.engine = self.create_db_engine(self.db_path)
+        _db_key = db_key
 
         # Set up event listener to apply PRAGMA key on every connection
         @event.listens_for(self.engine, "connect")
-        def _set_pragma_key(dbapi_conn, connection_record):
+        def _set_pragma_key(dbapi_conn: Any, _connection_record: Any) -> None:
             cursor = dbapi_conn.cursor()
-            pragma_sql = f"PRAGMA key = \"x'{self.db_key}'\""
-            cursor.execute(pragma_sql)
-            cursor.execute("PRAGMA journal_mode=WAL")
-            cursor.execute("PRAGMA foreign_keys = ON")
-            cursor.close()
+            try:
+                try:
+                    cursor.execute(f"PRAGMA key = \"x'{_db_key}'\"")
+                except Exception as exc:
+                    raise RuntimeError(
+                        "Failed to set database encryption key"
+                    ) from exc
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA foreign_keys = ON")
+            finally:
+                cursor.close()
 
         self.SessionLocal = sessionmaker(
             bind=self.engine, autoflush=False, autocommit=False
