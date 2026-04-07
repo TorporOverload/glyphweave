@@ -30,6 +30,7 @@ from typing import Optional, Set
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from app.infrastructure.crypto.constants import NONCE_SIZE
+from app.infrastructure.crypto.primitives.secure_memory import secure_zero
 from app.infrastructure.crypto.service.key_service import KeyService
 from app.infrastructure.crypto.types import KeyPurpose
 from app.common.paths.runtime_layout import wal_temp_blobs_dir
@@ -76,9 +77,9 @@ class TempStore:
         self.tmp_dir = wal_temp_blobs_dir(self.cache_dir)
 
         # Key cache to avoid repeated derivation
-        self._key_cache: dict[str, bytes] = {}
+        self._key_cache: dict[str, bytearray] = {}
 
-    def _get_file_key(self, file_id: str) -> bytes:
+    def _get_file_key(self, file_id: str) -> bytearray:
         """Get or derive the file-specific encryption key."""
         if file_id not in self._key_cache:
             self._key_cache[file_id] = self.key_service.derive_sub_key(
@@ -110,7 +111,7 @@ class TempStore:
 
         # Derive encryption key
         file_key = self._get_file_key(file_id)
-        cipher = AESGCM(file_key)
+        cipher = AESGCM(bytes(file_key))
 
         # Generate nonce
         nonce = secrets.token_bytes(NONCE_SIZE)
@@ -174,7 +175,7 @@ class TempStore:
 
             # Derive key and decrypt
             file_key = self._get_file_key(file_id)
-            cipher = AESGCM(file_key)
+            cipher = AESGCM(bytes(file_key))
             aad = f"TEMP_BLOB:{file_id}:{chunk_index}".encode("utf-8")
 
             plaintext = cipher.decrypt(nonce, ciphertext, aad)
@@ -258,4 +259,10 @@ class TempStore:
             return set()
 
         return {path.stem for path in self.tmp_dir.glob("*.enc")}
+
+    def clear_key_cache(self) -> None:
+        """Zero and clear all cached encryption keys."""
+        for key_bytes in self._key_cache.values():
+            secure_zero(key_bytes)
+        self._key_cache.clear()
 

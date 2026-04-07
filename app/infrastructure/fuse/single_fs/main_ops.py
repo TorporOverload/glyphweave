@@ -46,13 +46,15 @@ def getattr_op(fs, path, fh=None):
         }
 
     name = path.lstrip("/")
-    if name in fs._temp_files:
-        meta = fs._temp_meta.get(name, {})
+    with fs._temp_lock:
+        temp_data = fs._temp_files.get(name)
+        meta = dict(fs._temp_meta.get(name, {}))
+    if temp_data is not None:
         return {
             **base,
             "st_mode": meta.get("mode", stat.S_IFREG | 0o666),
             "st_nlink": 1,
-            "st_size": meta.get("size", len(fs._temp_files[name])),
+            "st_size": meta.get("size", len(temp_data)),
             "st_ctime": int(meta.get("ctime", now)),
             "st_mtime": int(meta.get("mtime", now)),
             "st_atime": int(meta.get("atime", now)),
@@ -68,7 +70,8 @@ def readdir_op(fs, path, fh):
     if path != "/":
         raise FuseOSError(errno.ENOTDIR)
     entries = [".", "..", fs.file_name]
-    entries.extend(fs._temp_files.keys())
+    with fs._temp_lock:
+        entries.extend(fs._temp_files.keys())
     return entries
 
 
@@ -77,11 +80,12 @@ def open_op(fs, path, flags):
     handling."""
     if not fs._is_main_path(path):
         name = path.lstrip("/")
-        if name in fs._temp_files:
-            fh = fs._temp_fh_counter
-            fs._temp_fh_counter += 1
-            fs._temp_file_handles[fh] = name
-            return fh
+        with fs._temp_lock:
+            if name in fs._temp_files:
+                fh = fs._temp_fh_counter
+                fs._temp_fh_counter += 1
+                fs._temp_file_handles[fh] = name
+                return fh
         raise FuseOSError(errno.ENOENT)
     return fs._open_main(flags)
 
@@ -89,10 +93,11 @@ def open_op(fs, path, flags):
 def read_op(fs, path, size, offset, fh):
     """Read size bytes at offset from a temp or main file handle."""
     del path
-    temp_name = fs._temp_file_handles.get(fh)
-    if temp_name is not None:
-        data = fs._temp_files.get(temp_name, bytearray())
-        return bytes(data[offset : offset + size])
+    with fs._temp_lock:
+        temp_name = fs._temp_file_handles.get(fh)
+        if temp_name is not None:
+            data = fs._temp_files.get(temp_name, bytearray())
+            return bytes(data[offset : offset + size])
 
     handle = fs.handle_manager.get(fh)
     if handle is None:
@@ -122,30 +127,31 @@ def write_op(fs, path, data, offset, fh):
     """Write data at offset into a temp or main file handle and return bytes
     written."""
     del path
-    temp_name = fs._temp_file_handles.get(fh)
-    if temp_name is not None:
-        buf = fs._temp_files.get(temp_name)
-        if buf is None:
-            raise FuseOSError(errno.EBADF)
+    with fs._temp_lock:
+        temp_name = fs._temp_file_handles.get(fh)
+        if temp_name is not None:
+            buf = fs._temp_files.get(temp_name)
+            if buf is None:
+                raise FuseOSError(errno.EBADF)
 
-        end_offset = offset + len(data)
-        if end_offset > len(buf):
-            buf.extend(b"\x00" * (end_offset - len(buf)))
-        buf[offset:end_offset] = data
+            end_offset = offset + len(data)
+            if end_offset > len(buf):
+                buf.extend(b"\x00" * (end_offset - len(buf)))
+            buf[offset:end_offset] = data
 
-        meta = fs._temp_meta.setdefault(
-            temp_name,
-            {
-                "size": len(buf),
-                "mode": stat.S_IFREG | 0o666,
-                "ctime": time.time(),
-                "mtime": time.time(),
-                "atime": time.time(),
-            },
-        )
-        meta["size"] = len(buf)
-        meta["mtime"] = time.time()
-        return len(data)
+            meta = fs._temp_meta.setdefault(
+                temp_name,
+                {
+                    "size": len(buf),
+                    "mode": stat.S_IFREG | 0o666,
+                    "ctime": time.time(),
+                    "mtime": time.time(),
+                    "atime": time.time(),
+                },
+            )
+            meta["size"] = len(buf)
+            meta["mtime"] = time.time()
+            return len(data)
 
     handle = fs.handle_manager.get(fh)
     if handle is None:
@@ -190,88 +196,55 @@ def write_op(fs, path, data, offset, fh):
 
 def truncate_op(fs, path, length, fh=None):
     """Truncate a temp or main file to length bytes via the given file handle."""
-    del path
+    name = path.lstrip("/")
+    with fs._temp_lock:
+        if name in fs._temp_files:
+            _truncate_temp_file(fs, name, length)
+            return 0
+
     if fh is None:
-        raise FuseOSError(errno.EINVAL)
-
-    temp_name = fs._temp_file_handles.get(fh)
-    if temp_name is not None:
-        buf = fs._temp_files.get(temp_name)
-        if buf is None:
-            raise FuseOSError(errno.EBADF)
-
-        if length < len(buf):
-            del buf[length:]
-        elif length > len(buf):
-            buf.extend(b"\x00" * (length - len(buf)))
-
-        meta = fs._temp_meta.setdefault(
-            temp_name,
-            {
-                "size": len(buf),
-                "mode": stat.S_IFREG | 0o666,
-                "ctime": time.time(),
-                "mtime": time.time(),
-                "atime": time.time(),
-            },
-        )
-        meta["size"] = len(buf)
-        meta["mtime"] = time.time()
+        fh = fs._open_main(0)
+        try:
+            _do_truncate(fs, fh, length)
+        finally:
+            release_op(fs, path, fh)
         return 0
 
-    handle = fs.handle_manager.get(fh)
-    if handle:
-        fs.handle_manager.truncate(fh, length)
-        fs.metadata.plaintext_size = length
+    _do_truncate(fs, fh, length)
     return 0
 
 
 def release_op(fs, path, fh):
     """Flush dirty chunks to blobs, clean up WAL entries, and release the file
     handle."""
-    temp_name = fs._temp_file_handles.pop(fh, None)
-    if temp_name is not None:
-        return 0
+    with fs._temp_lock:
+        temp_name = fs._temp_file_handles.pop(fh, None)
+        if temp_name is not None:
+            return 0
 
     handle = fs.handle_manager.get(fh)
     if handle is None:
         return 0
 
-    has_dirty = handle.is_dirty
-    dirty_chunks = handle.get_dirty_chunks() if has_dirty else {}
-    flush_failed = False
-    old_ref = None
-    old_entry = None
+    if not handle.is_dirty:
+        fs.handle_manager.release(fh, flush=False)
+        fs._open_count = max(0, fs._open_count - 1)
+        return 0
 
-    if has_dirty:
-        try:
-            old_ref = fs.file_service.get_file_reference_with_blobs(fs.file_ref_id)
-            old_entry = old_ref.file_entry if old_ref is not None else None
-            fs.chunk_store.flush_to_blobs(
-                file_id=fs.file_id,
-                file_ref_id=fs.file_ref_id,
-                dirty_chunks=dirty_chunks,
-                original_size=handle.metadata.plaintext_size,
-            )
-            fs._refresh_after_flush()
-            if fs.event_emitter is not None:
-                updated_ref = fs.file_service.get_file_reference_with_blobs(
-                    fs.file_ref_id
-                )
-                new_entry = updated_ref.file_entry if updated_ref is not None else None
-                if (
-                    updated_ref is not None
-                    and new_entry is not None
-                    and old_entry is not None
-                    and (
-                        old_entry.file_id != new_entry.file_id
-                        or old_entry.content_hash != new_entry.content_hash
-                    )
-                ):
-                    fs.event_emitter.emit_file_update(updated_ref, old_entry, new_entry)
-        except Exception as e:
-            flush_failed = True
-            logger.error(f"Failed to flush blobs for {path}: {e}", exc_info=True)
+    flush_failed = False
+    old_ref = fs.file_service.get_file_reference_with_blobs(fs.file_ref_id)
+    old_entry = old_ref.file_entry if old_ref is not None else None
+
+    try:
+        fs.chunk_store.flush_to_blobs(
+            file_id=fs.file_id,
+            file_ref_id=fs.file_ref_id,
+            dirty_chunks=handle.get_dirty_chunks(),
+            original_size=handle.metadata.plaintext_size,
+        )
+    except Exception as e:
+        flush_failed = True
+        logger.error(f"Failed to flush blobs for {path}: {e}", exc_info=True)
 
     if not flush_failed:
         try:
@@ -282,9 +255,64 @@ def release_op(fs, path, fh):
         except Exception as e:
             logger.error(f"Failed WAL cleanup for {path}: {e}", exc_info=True)
 
+        try:
+            fs._refresh_after_flush()
+            _emit_update_event(fs, old_entry)
+        except Exception as e:
+            logger.error(
+                f"Post-flush refresh/emit failed for {path}: {e}", exc_info=True
+            )
+
     fs.handle_manager.release(fh, flush=False)
     fs._open_count = max(0, fs._open_count - 1)
     if flush_failed:
         raise FuseOSError(errno.EIO)
     return 0
 
+
+def _do_truncate(fs, fh, length) -> None:
+    handle = fs.handle_manager.get(fh)
+    if handle:
+        fs.handle_manager.truncate(fh, length)
+        fs.metadata.plaintext_size = length
+
+
+def _truncate_temp_file(fs, temp_name: str, length: int) -> None:
+    buf = fs._temp_files.get(temp_name)
+    if buf is None:
+        raise FuseOSError(errno.EBADF)
+
+    if length < len(buf):
+        del buf[length:]
+    elif length > len(buf):
+        buf.extend(b"\x00" * (length - len(buf)))
+
+    meta = fs._temp_meta.setdefault(
+        temp_name,
+        {
+            "size": len(buf),
+            "mode": stat.S_IFREG | 0o666,
+            "ctime": time.time(),
+            "mtime": time.time(),
+            "atime": time.time(),
+        },
+    )
+    meta["size"] = len(buf)
+    meta["mtime"] = time.time()
+
+
+def _emit_update_event(fs, old_entry) -> None:
+    if fs.event_emitter is None or old_entry is None:
+        return
+
+    updated_ref = fs.file_service.get_file_reference_with_blobs(fs.file_ref_id)
+    new_entry = updated_ref.file_entry if updated_ref is not None else None
+    if (
+        updated_ref is not None
+        and new_entry is not None
+        and (
+            old_entry.file_id != new_entry.file_id
+            or old_entry.content_hash != new_entry.content_hash
+        )
+    ):
+        fs.event_emitter.emit_file_update(updated_ref, old_entry, new_entry)

@@ -1,5 +1,6 @@
 """Single-file FUSE filesystem public API."""
 
+import threading
 import unicodedata
 import stat
 from pathlib import Path
@@ -69,6 +70,7 @@ class SingleFileFS(Operations):
         self.chunk_size = chunk_size
         self._open_count = 0
 
+        self._temp_lock = threading.Lock()
         self._temp_files = {}
         self._temp_meta = {}
         self._temp_file_handles = {}

@@ -31,6 +31,9 @@ def destroy_fs(fs, path):
     unmounted."""
     del path
     fs.handle_manager.close_all(flush=True)
-    fs._temp_files.clear()
-    fs._temp_meta.clear()
-    fs._temp_file_handles.clear()
+    with fs._temp_lock:
+        fs._temp_files.clear()
+        fs._temp_meta.clear()
+        fs._temp_file_handles.clear()
+    fs.temp_store.clear_key_cache()
+    fs.chunk_store.clear_key_cache()

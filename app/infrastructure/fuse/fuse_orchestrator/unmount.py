@@ -47,25 +47,39 @@ def do_unmount(
     """Tear down the FUSE mount for file_ref_id, optionally in a background thread."""
     rt = get_runtime_module()
     with lock:
-        if file_ref_id not in mounts:
+        info = mounts.get(file_ref_id)
+        if info is None:
             return False
-        info = mounts.pop(file_ref_id)
 
     if background:
+        def _run_background() -> None:
+            success = unmount_info(file_ref_id, info)
+            if success:
+                with lock:
+                    mounts.pop(file_ref_id, None)
+            else:
+                rt.logger.warning(
+                    "Unmount failed for %s, mount entry retained", file_ref_id
+                )
+
         thread = rt.threading.Thread(
-            target=unmount_info,
-            args=(file_ref_id, info),
+            target=_run_background,
             name=f"glyphweave_unmount_{file_ref_id}",
             daemon=True,
         )
         thread.start()
         return True
 
-    unmount_info(file_ref_id, info)
-    return True
+    success = unmount_info(file_ref_id, info)
+    if success:
+        with lock:
+            mounts.pop(file_ref_id, None)
+    else:
+        rt.logger.warning("Unmount failed for %s, mount entry retained", file_ref_id)
+    return success
 
 
-def unmount_info(file_ref_id: int, info: MountInfo) -> None:
+def unmount_info(file_ref_id: int, info: MountInfo) -> bool:
     """Send CTRL_BREAK, run net-use delete, wait for the FUSE process,
     and clean up the mount dir."""
     rt = get_runtime_module()
@@ -139,13 +153,16 @@ def unmount_info(file_ref_id: int, info: MountInfo) -> None:
             f"FUSE process for ref={file_ref_id} could not be stopped; "
             f"skipping mount dir cleanup to avoid data loss"
         )
-        return
+        return False
 
     try:
         if info.mount_dir.exists():
             rt.shutil.rmtree(info.mount_dir, ignore_errors=True)
     except Exception as e:
         rt.logger.warning(f"Failed to clean up mount dir {info.mount_dir}: {e}")
+        return False
+
+    return True
 
 
 def wait_for_handles_to_close(info: MountInfo, timeout: float) -> None:

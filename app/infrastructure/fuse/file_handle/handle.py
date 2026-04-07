@@ -60,6 +60,11 @@ class FileHandle:
             total += len(chunk) if chunk else 0
         return total
 
+    @property
+    def last_access_time(self) -> float:
+        """Return the most recent observed access timestamp for the handle."""
+        return max(self.opened_at, self.last_read_at, self.last_write_at)
+
     def get_chunk(self, chunk_index: int) -> Optional[bytearray]:
         """Return the cached bytearray for a chunk, or None if not cached."""
         with self._lock:
@@ -160,6 +165,20 @@ class FileHandle:
             self._chunks_cache.clear()
             self._dirty_chunks.clear()
             self._metadata_dirty = False
+
+    def evict_chunks(self, target_bytes: int) -> int:
+        """Evict up to ``target_bytes`` of clean cached chunks."""
+        freed = 0
+        with self._lock:
+            for idx in list(self._chunks_cache.keys()):
+                if freed >= target_bytes:
+                    break
+                if idx in self._dirty_chunks:
+                    continue
+                chunk = self._chunks_cache.pop(idx)
+                freed += len(chunk) if chunk else 0
+                self._secure_clear_chunk(chunk)
+        return freed
 
     @staticmethod
     def _secure_clear_chunk(chunk: bytearray) -> None:

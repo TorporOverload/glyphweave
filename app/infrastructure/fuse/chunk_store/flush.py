@@ -1,11 +1,9 @@
 import hashlib
 import math
-import os
 import secrets
 from io import BytesIO
 from typing import Dict
 
-from app.common.paths.runtime_layout import plaintext_staging_dir
 from app.common.paths.vault_layout import resolve_blob_path
 from app.common.logging import logger
 
@@ -103,40 +101,25 @@ def encrypt_and_store(
     mime_type: str,
 ):
     """Encrypt plaintext into blob format and create DB entry records."""
-    temp_dir = plaintext_staging_dir(store.cache_dir)
-    temp_path = temp_dir / f"plain_{secrets.token_hex(8)}.tmp"
+    plaintext_buffer = BytesIO(plaintext)
+    plaintext_buffer.seek(0)
+    blob_ids = store.encryption_service.encrypt_file(
+        file_path=plaintext_buffer,
+        vault_path=store.vault_path,
+        master_key=store.key_service.master_key.view(),
+        vault_id=store.vault_id,
+        file_id=file_id,
+    )
 
-    try:
-        with open(temp_path, "wb") as f:
-            f.write(plaintext)
-            f.flush()
-            os.fsync(f.fileno())
-
-        blob_ids = store.encryption_service.encrypt_file(
-            file_path=temp_path,
-            vault_path=store.vault_path,
-            master_key=store.key_service.master_key.view(),
-            vault_id=store.vault_id,
-            file_id=file_id,
-        )
-
-        encrypted_size = sum(
-            resolve_blob_path(store.vault_path, bid).stat().st_size for bid in blob_ids
-        )
-        return store.file_service.create_file_entry_with_blobs(
-            file_id=file_id,
-            content_hash=content_hash,
-            mime_type=mime_type,
-            encrypted_size=encrypted_size,
-            original_size=len(plaintext),
-            blob_ids=blob_ids,
-        )
-    finally:
-        if temp_path.exists():
-            size = temp_path.stat().st_size
-            with open(temp_path, "wb") as f:
-                f.write(b"\x00" * size)
-                f.flush()
-                os.fsync(f.fileno())
-            temp_path.unlink()
+    encrypted_size = sum(
+        resolve_blob_path(store.vault_path, bid).stat().st_size for bid in blob_ids
+    )
+    return store.file_service.create_file_entry_with_blobs(
+        file_id=file_id,
+        content_hash=content_hash,
+        mime_type=mime_type,
+        encrypted_size=encrypted_size,
+        original_size=len(plaintext),
+        blob_ids=blob_ids,
+    )
 

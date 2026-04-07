@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Dict, List
 
 from app.infrastructure.crypto.constants import FUSE_CHUNK_SIZE
+from app.infrastructure.crypto.primitives.secure_memory import secure_zero
 from app.infrastructure.crypto.service.encryption_service import EncryptionService
 from app.infrastructure.crypto.service.key_service import KeyService
 from app.infrastructure.crypto.types import KeyPurpose
@@ -53,15 +54,21 @@ class ChunkStore:
         self.gc = gc
 
         self._indices: Dict[str, ChunkIndex] = {}
-        self._key_cache: Dict[str, bytes] = {}
+        self._key_cache: Dict[str, bytearray] = {}
 
-    def _get_file_key(self, file_id: str) -> bytes:
+    def _get_file_key(self, file_id: str) -> bytearray:
         if file_id not in self._key_cache:
             self._key_cache[file_id] = self.key_service.derive_sub_key(
                 KeyPurpose.FILE,
                 file_id,
             )
         return self._key_cache[file_id]
+
+    def clear_key_cache(self) -> None:
+        """Zero and clear all cached encryption keys."""
+        for key_bytes in self._key_cache.values():
+            secure_zero(key_bytes)
+        self._key_cache.clear()
 
     def load_blob_index(self, file_id: str, blob_ids: List[str]) -> None:
         load_blob_index(self, file_id, blob_ids)

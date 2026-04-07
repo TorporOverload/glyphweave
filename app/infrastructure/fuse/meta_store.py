@@ -2,8 +2,8 @@ import secrets
 import stat
 from typing import Dict, List, Optional, Tuple
 
-from app.infrastructure.fuse.types import FileMeta
 from app.common.logging import logger
+from app.infrastructure.fuse.types import FileMeta
 
 
 class MetaStore:
@@ -169,11 +169,18 @@ class MetaStore:
             self._directories[new_path] = old_entries
             for child_path in list(self._path_to_id.keys()):
                 if child_path.startswith(old_path + "/"):
-                    new_child = new_path + child_path[len(old_path):]
+                    new_child = new_path + child_path[len(old_path) :]
                     file_id = self._path_to_id.pop(child_path)
                     self._path_to_id[new_child] = file_id
+            old_prefix = old_path + "/"
+            nested_dirs = [
+                path
+                for path in list(self._directories.keys())
+                if path.startswith(old_prefix)
+            ]
+            for old_dir in nested_dirs:
+                new_dir = new_path + old_dir[len(old_path) :]
+                self._directories[new_dir] = self._directories.pop(old_dir)
         self._directories[old_parent].discard(old_name)
         self._directories[new_parent].add(new_name)
         logger.debug(f"Renamed: {old_path} -> {new_path}")
-
-
