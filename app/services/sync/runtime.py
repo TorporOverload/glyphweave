@@ -8,20 +8,17 @@ from threading import Condition, Event as ThreadEvent, Thread
 from time import monotonic
 from typing import Any, Callable, cast
 
-from sqlalchemy import select
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
-from app.infrastructure.persistence.db.model.processed_event import ProcessedEvent
-from app.infrastructure.persistence.db.service.session import session_scope
 from app.infrastructure.persistence.event_store import EventStore
 from app.common.logging import logger
 
-from app.core.domain.sync.models import DiscoveredEvent
-from .replay import is_event_ready_for_replay, replay_vault_events
+from .replay import replay_vault_events
 
 INITIAL_REPLAY_DELAY_SECONDS = 10.0
 RETRY_DELAY_SECONDS = 5 * 60.0
+REPLAY_SENTINEL = "__replay__"
 
 
 @dataclass(order=True)
@@ -52,7 +49,7 @@ class _EventObjectHandler(FileSystemEventHandler):
             return
         if path.suffix != ".json":
             return
-        self._coordinator.schedule(path.stem, INITIAL_REPLAY_DELAY_SECONDS)
+        self._coordinator.schedule_replay()
 
     @staticmethod
     def _coerce_event_path(raw_path: object) -> Path | None:
@@ -85,6 +82,8 @@ class EventReplayRuntime:
         self._stop_event = ThreadEvent()
         self._thread: Any = None
         self._observer: Any = None
+        self._replay_pending = False
+        self._replay_delay = INITIAL_REPLAY_DELAY_SECONDS
 
     def start(self) -> None:
         if self._thread is not None:
@@ -126,6 +125,14 @@ class EventReplayRuntime:
             heapq.heappush(self._queue, _ScheduledReplay(run_at, event_hash))
             self._condition.notify_all()
 
+    def schedule_replay(self, delay_seconds: float | None = None) -> None:
+        with self._condition:
+            if self._replay_pending:
+                return
+            self._replay_pending = True
+
+        self.schedule(REPLAY_SENTINEL, delay_seconds or self._replay_delay)
+
     def run(self) -> None:
         while True:
             scheduled = self._next_due()
@@ -157,22 +164,11 @@ class EventReplayRuntime:
                     self._condition.wait(timeout=0.5)
 
     def _process_event_hash(self, event_hash: str) -> None:
-        if self._is_already_processed(event_hash):
+        if event_hash != REPLAY_SENTINEL:
             return
 
-        try:
-            discovered = self._store.load_event(event_hash)
-        except FileNotFoundError:
-            return
-        except Exception:
-            logger.exception("Failed to load watched event %s", event_hash)
-            self.schedule(event_hash, RETRY_DELAY_SECONDS)
-            return
-
-        wrapped = DiscoveredEvent(event=discovered, source_path=None)
-        if not is_event_ready_for_replay(self._context.require_vault_path(), wrapped):
-            self.schedule(event_hash, RETRY_DELAY_SECONDS)
-            return
+        with self._condition:
+            self._replay_pending = False
 
         try:
             result = replay_vault_events(
@@ -184,20 +180,8 @@ class EventReplayRuntime:
             )
             if result.total > 0:
                 self._on_replayed(self._context)
+            if result.blocked > 0:
+                self.schedule_replay(RETRY_DELAY_SECONDS)
         except Exception:
-            logger.exception("Failed to replay watched event %s", event_hash)
-            self.schedule(event_hash, RETRY_DELAY_SECONDS)
-            return
-
-        if not self._is_already_processed(event_hash):
-            self.schedule(event_hash, RETRY_DELAY_SECONDS)
-
-    def _is_already_processed(self, event_hash: str) -> bool:
-        session_factory = self._context.session_factory
-        if session_factory is None:
-            return True
-        with session_scope(session_factory, commit=False) as session:
-            processed = session.scalar(
-                select(ProcessedEvent.id).where(ProcessedEvent.event_hash == event_hash)
-            )
-        return processed is not None
+            logger.exception("Failed to replay watched events")
+            self.schedule_replay(RETRY_DELAY_SECONDS)

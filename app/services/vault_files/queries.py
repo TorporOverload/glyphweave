@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import json
+from typing import TYPE_CHECKING
 
 from app.infrastructure.persistence.db.service.search import (
     get_retriable_extractions,
@@ -16,20 +17,26 @@ from app.infrastructure.persistence.db.service.session import session_scope
 from app.services.content.extraction_service import ExtractionService
 from app.services.models import SearchPage, SearchResult, SyncConflictInfo
 
+if TYPE_CHECKING:
+    from app.infrastructure.persistence.db.model.sync_conflict import SyncConflict
+    from app.services.vault_files.vault_file_service import VaultFileService
 
-def list_root_entries(service):
+
+def list_root_entries(service: "VaultFileService"):
     return service._require_folder_service().get_root_entries()
 
 
-def list_children(service, parent_id: int):
+def list_children(service: "VaultFileService", parent_id: int):
     return service._require_folder_service().get_children(parent_id)
 
 
-def list_all_entries(service):
+def list_all_entries(service: "VaultFileService"):
     return service._require_folder_service().get_vault_tree()
 
 
-def get_file_reference_metadata(service, file_ref_id: int) -> dict:
+def get_file_reference_metadata(
+    service: "VaultFileService", file_ref_id: int
+) -> dict:
     file_ref = service._require_file_service().get_file_reference_with_blobs(
         file_ref_id
     )
@@ -46,11 +53,18 @@ def get_file_reference_metadata(service, file_ref_id: int) -> dict:
     return json.loads(metadata_json)
 
 
-def search(service, query: str, limit: int = 20) -> list[SearchResult]:
+def search(
+    service: "VaultFileService", query: str, limit: int = 20
+) -> list[SearchResult]:
     return search_page(service, query, limit=limit, offset=0).results
 
 
-def search_page(service, query: str, limit: int = 20, offset: int = 0) -> SearchPage:
+def search_page(
+    service: "VaultFileService",
+    query: str,
+    limit: int = 20,
+    offset: int = 0,
+) -> SearchPage:
     normalized = query.strip()
     if not normalized:
         return SearchPage(results=[], has_more=False)
@@ -112,7 +126,9 @@ def search_page(service, query: str, limit: int = 20, offset: int = 0) -> Search
         )
 
 
-def reindex_pending(service, limit: int = 500) -> tuple[int, int]:
+def reindex_pending(
+    service: "VaultFileService", limit: int = 500
+) -> tuple[int, int]:
     if service.context.session_factory is None:
         raise RuntimeError("Session factory is not initialized")
 
@@ -138,7 +154,7 @@ def reindex_pending(service, limit: int = 500) -> tuple[int, int]:
     return success, failed
 
 
-def get_db_debug_info(service) -> dict:
+def get_db_debug_info(service: "VaultFileService") -> dict:
     local_data_path = service.context.local_data_path
     if local_data_path is None:
         raise RuntimeError("Local data path is not set")
@@ -149,14 +165,14 @@ def get_db_debug_info(service) -> dict:
     }
 
 
-def get_recovery_phrase(service) -> str:
+def get_recovery_phrase(service: "VaultFileService") -> str:
     key_service = service.context.key_service
     if not key_service or not key_service.master_key:
         raise RuntimeError("Vault is not unlocked")
     return key_service.unwrap_recovery_phrase_with_master()
 
 
-def list_sync_conflicts(service) -> list[SyncConflictInfo]:
+def list_sync_conflicts(service: "VaultFileService") -> list[SyncConflictInfo]:
     session_factory = service.context.session_factory
     if session_factory is None:
         raise RuntimeError("Session factory is not initialized")
@@ -166,7 +182,9 @@ def list_sync_conflicts(service) -> list[SyncConflictInfo]:
         return [_to_sync_conflict_info(conflict) for conflict in conflicts]
 
 
-def get_sync_conflict(service, conflict_id: str) -> SyncConflictInfo | None:
+def get_sync_conflict(
+    service: "VaultFileService", conflict_id: str
+) -> SyncConflictInfo | None:
     session_factory = service.context.session_factory
     if session_factory is None:
         raise RuntimeError("Session factory is not initialized")
@@ -186,7 +204,7 @@ def select_supported_reference_name(entry) -> str | None:
     return None
 
 
-def _to_sync_conflict_info(conflict) -> SyncConflictInfo:
+def _to_sync_conflict_info(conflict: "SyncConflict") -> SyncConflictInfo:
     return SyncConflictInfo(
         conflict_id=conflict.conflict_id,
         node_id=conflict.node_id,
@@ -205,25 +223,17 @@ def _to_sync_conflict_info(conflict) -> SyncConflictInfo:
 
 
 def format_filename_snippet(file_name: str, query: str) -> str:
-    safe_name = html.escape(file_name)
-    safe_query = html.escape(query)
+    lower_name = file_name.lower()
+    lower_query = query.lower()
+    pos = lower_name.find(lower_query)
 
-    exact_index = safe_name.find(safe_query)
-    if exact_index >= 0:
-        return (
-            f"Filename: {safe_name[:exact_index]}<b>"
-            f"{safe_name[exact_index : exact_index + len(safe_query)]}</b>"
-            f"{safe_name[exact_index + len(safe_query) :]}"
-        )
+    if pos == -1:
+        return f"Filename: {html.escape(file_name)}"
 
-    lower_name = safe_name.lower()
-    lower_query = safe_query.lower()
-    lower_index = lower_name.find(lower_query)
-    if lower_index >= 0:
-        return (
-            f"Filename: {safe_name[:lower_index]}<b>"
-            f"{safe_name[lower_index : lower_index + len(safe_query)]}</b>"
-            f"{safe_name[lower_index + len(safe_query) :]}"
-        )
-
-    return f"Filename: {safe_name}"
+    before = file_name[:pos]
+    match = file_name[pos : pos + len(query)]
+    after = file_name[pos + len(query) :]
+    return (
+        f"Filename: {html.escape(before)}<b>{html.escape(match)}</b>"
+        f"{html.escape(after)}"
+    )

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Protocol
 
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
+from app.common.atomic_write import atomic_write_text
 from app.common.logging import logger
 from app.common.paths.runtime_layout import replay_checkpoint_path
 from app.common.paths.vault_layout import resolve_blob_path
@@ -30,11 +33,58 @@ from app.services.sync.state import (
 )
 
 
+class ReplayableStore(Protocol):
+    """Minimal read-only interface required by replay_vault_events."""
+
+    def discover_events(
+        self,
+        *,
+        skip_hashes: set[str] | None = None,
+    ) -> list[DiscoveredEvent]: ...
+
+    def iter_frontier_hashes(self) -> set[str]: ...
+
+    def has_unprocessed_events(
+        self,
+        *,
+        skip_hashes: set[str] | None = None,
+    ) -> bool: ...
+
+
+@dataclass
+class _BlobSnapshot:
+    blob_id: str
+
+
+@dataclass
+class _FileEntrySnapshot:
+    file_id: str
+    content_hash: str
+    mime_type: str
+    original_size_bytes: int
+    encrypted_size_bytes: int
+    metadata_json: str | None
+    blobs: list[_BlobSnapshot] = field(default_factory=list)
+
+
+@dataclass
+class _ParentSnapshot:
+    node_id: str
+
+
+@dataclass
+class _FileRefSnapshot:
+    node_id: str
+    name: str
+    parent: _ParentSnapshot | None
+    file_entry: _FileEntrySnapshot | None = None
+
+
 def replay_vault_events(
     *,
     session_factory: sessionmaker,
     vault_path: Path,
-    store: EventStore,
+    store: ReplayableStore,
     local_data_path: Path | None = None,
     app_data_dir: Path | None = None,
 ) -> BatchProcessingResult:
@@ -57,6 +107,7 @@ def replay_vault_events(
             skipped=0,
             failed=0,
             conflicts=0,
+            blocked=0,
             results=[],
         )
 
@@ -68,14 +119,15 @@ def replay_vault_events(
     )
     processor = EventProcessor(session_factory)
     result = processor.process_batch(ordered)
-    _emit_conflict_resolution_events(
-        result,
-        ordered,
-        session_factory=session_factory,
-        store=store,
-        app_data_dir=app_data_dir,
-        local_data_path=local_data_path,
-    )
+    if isinstance(store, EventStore):
+        _emit_conflict_resolution_events(
+            result,
+            ordered,
+            session_factory=session_factory,
+            store=store,
+            app_data_dir=app_data_dir,
+            local_data_path=local_data_path,
+        )
     current_frontier = store.iter_frontier_hashes()
     logger.info(
         "Event replay completed: total=%s successful=%s"
@@ -87,6 +139,7 @@ def replay_vault_events(
         result.conflicts,
         len(blocked),
     )
+    result.blocked = len(blocked)
     _update_replay_checkpoint(
         local_data_path,
         current_frontier,
@@ -98,7 +151,7 @@ def replay_vault_events(
 
 def refresh_replay_checkpoint(
     *,
-    store: EventStore,
+    store: ReplayableStore,
     session_factory: sessionmaker,
     local_data_path: Path | None,
 ) -> None:
@@ -123,8 +176,6 @@ def _emit_conflict_resolution_events(
 ) -> None:
     if app_data_dir is None:
         return
-
-    from types import SimpleNamespace
 
     from sqlalchemy.orm import joinedload
 
@@ -160,11 +211,9 @@ def _emit_conflict_resolution_events(
         if str(conflict_id) in existing_archive_conflict_ids:
             continue
 
-        with session_scope(session_factory, commit=False) as session:
+        with session_scope(session_factory) as session:
             existing_conflict = session.scalar(
-                select(SyncConflict).where(
-                    SyncConflict.conflict_id == str(conflict_id)
-                )
+                select(SyncConflict).where(SyncConflict.conflict_id == str(conflict_id))
             )
             if (
                 existing_conflict is None
@@ -178,7 +227,9 @@ def _emit_conflict_resolution_events(
                 file_ref = session.scalar(
                     select(FileReference)
                     .options(
-                        joinedload(FileReference.file_entry).joinedload(FileEntry.blobs),
+                        joinedload(FileReference.file_entry).joinedload(
+                            FileEntry.blobs
+                        ),
                         joinedload(FileReference.parent),
                     )
                     .where(FileReference.id == existing_conflict.archived_file_ref_id)
@@ -219,24 +270,24 @@ def _emit_conflict_resolution_events(
             if file_ref.file_entry is None:
                 if kind == "file_conflict_archive":
                     continue
-                file_ref_payload = SimpleNamespace(
+                file_ref_payload = _FileRefSnapshot(
                     node_id=file_ref.node_id,
                     name=file_ref.name,
-                    parent=SimpleNamespace(node_id=file_ref.parent.node_id)
+                    parent=_ParentSnapshot(node_id=file_ref.parent.node_id)
                     if file_ref.parent is not None
                     else None,
                 )
             else:
-                file_ref_payload = SimpleNamespace(
+                file_ref_payload = _FileRefSnapshot(
                     node_id=file_ref.node_id,
                     name=file_ref.name,
-                    parent=SimpleNamespace(node_id=file_ref.parent.node_id)
+                    parent=_ParentSnapshot(node_id=file_ref.parent.node_id)
                     if file_ref.parent is not None
                     else None,
-                    file_entry=SimpleNamespace(
+                    file_entry=_FileEntrySnapshot(
                         file_id=file_ref.file_entry.file_id,
                         blobs=[
-                            SimpleNamespace(blob_id=blob.blob_id)
+                            _BlobSnapshot(blob_id=blob.blob_id)
                             for blob in file_ref.file_entry.blobs
                         ],
                         content_hash=file_ref.file_entry.content_hash,
@@ -261,6 +312,7 @@ def _emit_conflict_resolution_events(
             )
 
         if kind == "file_conflict_archive":
+            assert file_ref_payload.file_entry is not None
             emitter.emit_file_conflict_archive(
                 file_ref_payload,
                 file_ref_payload.file_entry,
@@ -381,9 +433,9 @@ def _load_replay_checkpoint(local_data_path: Path) -> set[str] | None:
 def _write_replay_checkpoint(local_data_path: Path, frontier: set[str]) -> None:
     path = replay_checkpoint_path(local_data_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
+    atomic_write_text(
+        path,
         json.dumps({"frontier": sorted(frontier)}, sort_keys=True, indent=2),
-        encoding="utf-8",
     )
 
 
@@ -442,5 +494,3 @@ def _all_blobs_exist(vault_path: Path, blob_ids: list[str]) -> bool:
     if not resolve_blob_path(vault_path, blob_ids[0]).parent.exists():
         return True
     return all(resolve_blob_path(vault_path, blob_id).exists() for blob_id in blob_ids)
-
-

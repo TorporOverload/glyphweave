@@ -29,8 +29,24 @@ packages = ["app"]
 dev = [
     "bandit>=1.9.3",
     "pytest>=9.0.2",
+    "pytest-cov>=7.0.0",
     "ruff>=0.9.9",
 ]
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["app/ui/**", "*/tests/*", "*/__pycache__/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+]
+show_missing = true
+skip_covered = false
 
 [tool.ruff]
 include = ["app/**/*.py"]
@@ -41,4 +57,5 @@ ignore = ["S101"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--cov=app --cov-report=term-missing"
 

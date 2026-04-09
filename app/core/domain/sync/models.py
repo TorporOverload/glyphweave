@@ -97,6 +97,7 @@ class BatchProcessingResult:
     skipped: int
     failed: int
     conflicts: int
+    blocked: int = 0
     results: list[ProcessingResult] = field(default_factory=list)
 
     @property

@@ -23,16 +23,16 @@ def handle_file_move(
     processor, session: Session, event: VaultEvent
 ) -> ProcessingResult:
     parsed = FileMoveData.from_dict(event.payload)
-    if processor._is_deleted_after_or_equal(session, parsed.node_id, event.hlc):
+    if processor.is_deleted_after_or_equal(session, parsed.node_id, event.hlc):
         return ProcessingResult(
             event_id=event.event_id,
             event_type=event.type.value,
             status=ProcessingStatus.SKIPPED_DUPLICATE,
             message="File move is older than a delete tombstone",
         )
-    if processor._is_stale_event(
+    if processor.is_stale_event(
         event.hlc,
-        processor._structural_hlc_for_node(session, parsed.node_id),
+        processor.structural_hlc_for_node(session, parsed.node_id),
     ):
         return ProcessingResult(
             event_id=event.event_id,
@@ -40,7 +40,7 @@ def handle_file_move(
             status=ProcessingStatus.SKIPPED_DUPLICATE,
             message="Stale file_move event",
         )
-    file_ref = processor._get_ref_by_node_id(session, parsed.node_id)
+    file_ref = processor.get_ref_by_node_id(session, parsed.node_id)
     if file_ref is None or file_ref.is_folder:
         return ProcessingResult(
             event_id=event.event_id,
@@ -49,7 +49,7 @@ def handle_file_move(
             message="File node not found",
         )
 
-    resolution = processor._resolve_parent_for_move(
+    resolution = processor.resolve_parent_for_move(
         session,
         parsed.new_parent_node_id,
         event.hlc,
@@ -68,7 +68,7 @@ def handle_file_move(
     file_ref.name = parsed.new_name
     conflict_archived = False
     if resolution.status == ParentResolutionStatus.CONFLICT_ARCHIVE:
-        file_ref.name = processor._conflict_name(parsed.new_name, event.hlc)
+        file_ref.name = processor.conflict_name(parsed.new_name, event.hlc)
         conflict_archived = True
     session.flush()
     if not conflict_archived and not _is_conflict_path(file_ref.virtual_path):
@@ -78,7 +78,7 @@ def handle_file_move(
             resolution_event_id=event.event_id,
             status="resolved",
         )
-    processor._upsert_sync_state(
+    processor.upsert_sync_state(
         session, parsed.node_id, event.hlc, True, False, event.event_id
     )
     conflict_info = (
@@ -88,7 +88,8 @@ def handle_file_move(
             event=event,
             node_kind="file",
             reason_code="deleted_parent_move",
-            reason_text="File move targeted a parent folder that had already been deleted",
+            reason_text=
+            "File move targeted a parent folder that had already been deleted",
             file_entry_id=file_ref.file_entry_id,
         )
         if conflict_archived
@@ -116,9 +117,9 @@ def handle_file_delete(
     processor, session: Session, event: VaultEvent
 ) -> ProcessingResult:
     parsed = FileDeleteData.from_dict(event.payload)
-    if processor._is_stale_event(
+    if processor.is_stale_event(
         event.hlc,
-        processor._structural_hlc_for_node(session, parsed.node_id),
+        processor.structural_hlc_for_node(session, parsed.node_id),
     ):
         return ProcessingResult(
             event_id=event.event_id,
@@ -126,14 +127,14 @@ def handle_file_delete(
             status=ProcessingStatus.SKIPPED_DUPLICATE,
             message="Stale file_delete event",
         )
-    if processor._is_deleted_after_or_equal(session, parsed.node_id, event.hlc):
+    if processor.is_deleted_after_or_equal(session, parsed.node_id, event.hlc):
         return ProcessingResult(
             event_id=event.event_id,
             event_type=event.type.value,
             status=ProcessingStatus.SKIPPED_DUPLICATE,
             message="File already deleted by a newer event",
         )
-    file_ref = processor._get_ref_by_node_id(session, parsed.node_id)
+    file_ref = processor.get_ref_by_node_id(session, parsed.node_id)
     if file_ref is None:
         resolve_active_sync_conflicts_for_node_ids(
             session,
@@ -141,8 +142,8 @@ def handle_file_delete(
             resolution_event_id=event.event_id,
             status="deleted",
         )
-        processor._record_tombstone(session, parsed.node_id, "file", event)
-        processor._upsert_sync_state(
+        processor.record_tombstone(session, parsed.node_id, "file", event)
+        processor.upsert_sync_state(
             session, parsed.node_id, event.hlc, True, True, event.event_id
         )
         return ProcessingResult(
@@ -161,8 +162,8 @@ def handle_file_delete(
     )
     session.delete(file_ref)
     session.flush()
-    processor._record_tombstone(session, parsed.node_id, "file", event)
-    processor._upsert_sync_state(
+    processor.record_tombstone(session, parsed.node_id, "file", event)
+    processor.upsert_sync_state(
         session, parsed.node_id, event.hlc, True, True, event.event_id
     )
     return ProcessingResult(

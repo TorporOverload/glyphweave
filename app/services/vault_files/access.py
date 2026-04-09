@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from app.infrastructure.persistence.db_dump_service import flush_db_dump_hook
 from app.infrastructure.platform.launcher import open_with_default_app
 from app.services.models import UnlockedFileInfo
@@ -9,8 +11,15 @@ from .vault_file_mounts import reopen_mounted_file, unmount_mounted_file
 from .vault_file_opening import open_file_by_ref as open_file_from_vault
 from .vault_file_sessions import cleanup_unlocked_files, list_unlocked_files
 
+if TYPE_CHECKING:
+    from app.services.vault_files.vault_file_service import VaultFileService
 
-def open_file_by_ref(service, file_ref_id: int, launch_in_default_app: bool = True):
+
+def open_file_by_ref(
+    service: "VaultFileService",
+    file_ref_id: int,
+    launch_in_default_app: bool = True,
+):
     return open_file_from_vault(
         service.context,
         fallback_opens=service.fallback_opens,
@@ -21,11 +30,11 @@ def open_file_by_ref(service, file_ref_id: int, launch_in_default_app: bool = Tr
     )
 
 
-def list_unlocked(service) -> list[UnlockedFileInfo]:
+def list_unlocked(service: "VaultFileService") -> list[UnlockedFileInfo]:
     return list_unlocked_files(service.context, service.fallback_opens)
 
 
-def reopen_unlocked(service, file_ref_id: int) -> str:
+def reopen_unlocked(service: "VaultFileService", file_ref_id: int) -> str:
     mounted = reopen_mounted_file(service.context, file_ref_id)
     if mounted is not None:
         return mounted
@@ -38,7 +47,7 @@ def reopen_unlocked(service, file_ref_id: int) -> str:
     raise FileNotFoundError("File is not currently unlocked")
 
 
-def unmount_unlocked(service, file_ref_id: int) -> str:
+def unmount_unlocked(service: "VaultFileService", file_ref_id: int) -> str:
     mounted = unmount_mounted_file(service.context, file_ref_id)
     if mounted is not None:
         return mounted
@@ -54,17 +63,19 @@ def unmount_unlocked(service, file_ref_id: int) -> str:
     )
 
 
-def cleanup(service, *, flush_db_dump: bool = True) -> None:
+def cleanup(service: "VaultFileService", *, flush_db_dump: bool = True) -> None:
     runtime = service.context.event_replay_runtime
     if runtime is not None:
         runtime.stop()
         service.context.event_replay_runtime = None
+    event_emitter = service._build_event_emitter()
     cleanup_unlocked_files(
         service.context,
         fallback_opens=service.fallback_opens,
         file_service=service._require_file_service(),
         folder_service=service._require_folder_service(),
         encryption_service=service._require_encryption_service(),
+        event_emitter=event_emitter,
     )
     session_factory = service.context.session_factory
     if flush_db_dump and session_factory is not None:

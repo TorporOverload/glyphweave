@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol, Sequence
 
 from app.common.device_id import default_frontier_alias, load_device_id
 from app.common.logging import logger
@@ -15,6 +15,64 @@ from app.services.sync.replay import refresh_replay_checkpoint
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import sessionmaker
+
+
+class ParentRefLike(Protocol):
+    @property
+    def node_id(self) -> str: ...
+
+
+class BlobLike(Protocol):
+    @property
+    def blob_id(self) -> str: ...
+
+
+class FileEntryLike(Protocol):
+    @property
+    def file_id(self) -> str: ...
+
+    @property
+    def content_hash(self) -> str: ...
+
+    @property
+    def mime_type(self) -> str: ...
+
+    @property
+    def original_size_bytes(self) -> int: ...
+
+    @property
+    def encrypted_size_bytes(self) -> int: ...
+
+    @property
+    def metadata_json(self) -> str | None: ...
+
+    @property
+    def blobs(self) -> Sequence[BlobLike]: ...
+
+
+class FileRefLike(Protocol):
+    @property
+    def node_id(self) -> str: ...
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def parent(self) -> ParentRefLike | None: ...
+
+    @property
+    def file_entry(self) -> FileEntryLike | None: ...
+
+
+class FolderRefLike(Protocol):
+    @property
+    def node_id(self) -> str: ...
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def parent(self) -> ParentRefLike | None: ...
 
 
 class EventEmitter:
@@ -36,7 +94,7 @@ class EventEmitter:
         self._local_data_path = local_data_path
         self._observe_existing_events()
 
-    def emit_file_add(self, file_ref: Any) -> VaultEvent:
+    def emit_file_add(self, file_ref: FileRefLike) -> VaultEvent:
         file_entry = file_ref.file_entry
         if file_entry is None:
             raise ValueError("file_ref.file_entry is required for file_add events")
@@ -56,8 +114,8 @@ class EventEmitter:
 
     def emit_file_conflict_archive(
         self,
-        file_ref: Any,
-        file_entry: Any,
+        file_ref: FileRefLike,
+        file_entry: FileEntryLike,
         archived_name: str,
         *,
         conflict_id: str,
@@ -110,9 +168,9 @@ class EventEmitter:
 
     def emit_file_update(
         self,
-        file_ref: Any,
-        old_entry: Any,
-        new_entry: Any,
+        file_ref: FileRefLike,
+        old_entry: FileEntryLike | None,
+        new_entry: FileEntryLike,
     ) -> VaultEvent:
         payload = {
             "node_id": file_ref.node_id,
@@ -132,7 +190,7 @@ class EventEmitter:
 
     def emit_file_move(
         self,
-        file_ref: Any,
+        file_ref: FileRefLike,
         *,
         new_parent_node_id: str | None,
         new_name: str,
@@ -146,7 +204,7 @@ class EventEmitter:
 
     def emit_file_delete(
         self,
-        file_ref: Any,
+        file_ref: FileRefLike,
         *,
         file_id: str | None = None,
     ) -> VaultEvent:
@@ -157,7 +215,7 @@ class EventEmitter:
         }
         return self._append(EventType.FILE_DELETE, payload)
 
-    def emit_folder_create(self, folder_ref: Any) -> VaultEvent:
+    def emit_folder_create(self, folder_ref: FolderRefLike) -> VaultEvent:
         payload = {
             "node_id": folder_ref.node_id,
             "parent_node_id": folder_ref.parent.node_id if folder_ref.parent else None,
@@ -167,7 +225,7 @@ class EventEmitter:
 
     def emit_folder_move(
         self,
-        folder_ref: Any,
+        folder_ref: FolderRefLike,
         *,
         new_parent_node_id: str | None,
         new_name: str,
@@ -181,7 +239,7 @@ class EventEmitter:
 
     def emit_folder_conflict_archive(
         self,
-        folder_ref: Any,
+        folder_ref: FolderRefLike,
         archived_name: str,
         *,
         conflict_id: str,
@@ -226,7 +284,7 @@ class EventEmitter:
 
     def emit_folder_delete(
         self,
-        folder_ref: Any,
+        folder_ref: FolderRefLike,
         *,
         cascade: bool = True,
     ) -> VaultEvent:
@@ -272,7 +330,9 @@ class EventEmitter:
 
     def _observe_existing_events(self) -> None:
         latest: dict[str, object] | None = None
-        for event_hash in self._store.iter_frontier_hashes():
+        frontier = self._store.iter_frontier_hashes()
+        observed_count = 0
+        for event_hash in frontier:
             try:
                 event = self._store.load_event(event_hash)
             except FileNotFoundError:
@@ -280,9 +340,15 @@ class EventEmitter:
             except Exception:
                 logger.exception("Failed to read frontier head event %s", event_hash)
                 continue
+            observed_count += 1
             candidate = event.hlc.to_dict()
             if latest is None or compare_hlc(candidate, latest) > 0:
                 latest = candidate
+        if frontier and observed_count == 0:
+            logger.warning(
+                "Failed to observe any of %d frontier head events; HLC may be behind",
+                len(frontier),
+            )
         if latest is not None:
             self._clock.observe(latest)
 

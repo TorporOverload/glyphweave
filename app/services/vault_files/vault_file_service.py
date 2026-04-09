@@ -1,13 +1,27 @@
 from __future__ import annotations
 
+from pathlib import Path
+from typing import TYPE_CHECKING
+
 from app.common.paths.runtime_layout import runtime_cache_dir
+from app.infrastructure.persistence.db.model.file_reference import FileReference
 from app.services.content.indexing_service import IndexingService
-from app.services.models import PendingFallbackOpen, VaultContext
+from app.services.models import (
+    PendingFallbackOpen,
+    SearchPage,
+    SearchResult,
+    SyncConflictInfo,
+    UnlockedFileInfo,
+    VaultContext,
+)
 from app.services.runtime.event_store_factory import build_event_store
 from app.services.sync.event_emitter import EventEmitter
 
 from . import access, commands, queries
 from .helpers import normalize_vault_path
+
+if TYPE_CHECKING:
+    from app.services.models import AddFileResult
 
 
 class VaultFileService:
@@ -156,18 +170,21 @@ class VaultFileService:
 
     def add_file(
         self,
-        source,
+        source: Path,
         dest_name: str | None = None,
         dest_parent_virtual_path: str | None = None,
-    ):
+    ) -> "AddFileResult":
         return commands.add_file(self, source, dest_name, dest_parent_virtual_path)
+
+    def create_folder(self, name: str, parent_virtual_path: str = "/"):
+        return commands.create_folder(self, name, parent_virtual_path)
 
     def copy_entry(
         self,
         source_virtual_path: str,
         destination_folder_virtual_path: str = "/",
         new_name: str | None = None,
-    ):
+    ) -> FileReference:
         return commands.copy_entry(
             self, source_virtual_path, destination_folder_virtual_path, new_name
         )
@@ -176,7 +193,7 @@ class VaultFileService:
         self,
         source_virtual_paths: list[str],
         destination_folder_virtual_path: str = "/",
-    ):
+    ) -> list[FileReference]:
         return commands.move_entries(
             self, source_virtual_paths, destination_folder_virtual_path
         )
@@ -192,7 +209,7 @@ class VaultFileService:
         conflict_id: str,
         destination_folder_virtual_path: str = "/",
         new_name: str | None = None,
-    ):
+    ) -> FileReference:
         return commands.restore_sync_conflict(
             self,
             conflict_id,
@@ -200,28 +217,32 @@ class VaultFileService:
             new_name,
         )
 
-    def export_entries(self, source_virtual_paths: list[str], destination_dir):
+    def export_entries(
+        self, source_virtual_paths: list[str], destination_dir: Path
+    ) -> list[Path]:
         return commands.export_entries(self, source_virtual_paths, destination_dir)
 
-    def list_root_entries(self):
+    def list_root_entries(self) -> list[FileReference]:
         return queries.list_root_entries(self)
 
-    def list_children(self, parent_id: int):
+    def list_children(self, parent_id: int) -> list[FileReference]:
         return queries.list_children(self, parent_id)
 
-    def list_all_entries(self):
+    def list_all_entries(self) -> list[FileReference]:
         return queries.list_all_entries(self)
 
     def get_file_reference_metadata(self, file_ref_id: int) -> dict:
         return queries.get_file_reference_metadata(self, file_ref_id)
 
-    def search(self, query: str, limit: int = 20):
+    def search(self, query: str, limit: int = 20) -> list[SearchResult]:
         return queries.search(self, query, limit)
 
-    def search_page(self, query: str, limit: int = 20, offset: int = 0):
+    def search_page(
+        self, query: str, limit: int = 20, offset: int = 0
+    ) -> SearchPage:
         return queries.search_page(self, query, limit, offset)
 
-    def reindex_pending(self, limit: int = 500):
+    def reindex_pending(self, limit: int = 500) -> tuple[int, int]:
         return queries.reindex_pending(self, limit)
 
     def get_db_debug_info(self) -> dict:
@@ -230,10 +251,10 @@ class VaultFileService:
     def get_recovery_phrase(self) -> str:
         return queries.get_recovery_phrase(self)
 
-    def list_sync_conflicts(self):
+    def list_sync_conflicts(self) -> list[SyncConflictInfo]:
         return queries.list_sync_conflicts(self)
 
-    def get_sync_conflict(self, conflict_id: str):
+    def get_sync_conflict(self, conflict_id: str) -> SyncConflictInfo | None:
         return queries.get_sync_conflict(self, conflict_id)
 
     @staticmethod
@@ -244,10 +265,12 @@ class VaultFileService:
     def _format_filename_snippet(file_name: str, query: str) -> str:
         return queries.format_filename_snippet(file_name, query)
 
-    def open_file_by_ref(self, file_ref_id: int, launch_in_default_app: bool = True):
+    def open_file_by_ref(
+        self, file_ref_id: int, launch_in_default_app: bool = True
+    ):
         return access.open_file_by_ref(self, file_ref_id, launch_in_default_app)
 
-    def list_unlocked_files(self):
+    def list_unlocked_files(self) -> list[UnlockedFileInfo]:
         return access.list_unlocked(self)
 
     def reopen_unlocked(self, file_ref_id: int) -> str:

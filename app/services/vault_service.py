@@ -4,10 +4,13 @@ from pathlib import Path
 
 from app.common.config import ensure_app_data_layout, get_app_data_dir
 from app.infrastructure.crypto.types import KDFParams
-from app.services.vault_integrity_service import VaultIntegrityReport, VaultIntegrityService
-from app.services.vault_files.vault_file_service import VaultFileService
 from app.services.models import VaultContext
 from app.services.runtime.vault_runtime_service import VaultRuntimeService
+from app.services.vault_files.vault_file_service import VaultFileService
+from app.services.vault_integrity_service import (
+    VaultIntegrityReport,
+    VaultIntegrityService,
+)
 
 
 class VaultService:
@@ -117,6 +120,10 @@ class VaultService:
     ):
         """Encrypt and import a file from the filesystem into the vault."""
         return self.files.add_file(source, dest_name, dest_parent_virtual_path)
+
+    def create_folder(self, name: str, parent_virtual_path: str = "/"):
+        """Create a folder inside the vault at the requested parent path."""
+        return self.files.create_folder(name, parent_virtual_path)
 
     def search(self, query: str, limit: int = 20):
         """Search vault files by indexed content."""

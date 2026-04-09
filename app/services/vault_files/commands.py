@@ -2,19 +2,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 
 from app.infrastructure.persistence.db.model.file_reference import FileReference
 from app.infrastructure.persistence.db.model.sync_conflict import SyncConflict
-from app.infrastructure.persistence.db.utils import escape_like_pattern as _escape_like_pattern
 from app.infrastructure.persistence.db.service.session import session_scope
 from app.infrastructure.persistence.db.service.sync_conflict_service import (
     get_sync_conflict_by_id,
     resolve_sync_conflict,
 )
-
-from app.services.sync.state import local_resolution_event_id as _local_resolution_event_id
+from app.infrastructure.persistence.db.utils import escape_like_pattern
+from app.services.sync.state import local_resolution_event_id 
 
 from .helpers import (
     collapse_descendant_entries,
@@ -23,6 +23,12 @@ from .helpers import (
     normalize_vault_path,
 )
 from .vault_file_import import add_file as add_file_to_vault
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
+    from app.services.models import AddFileResult
+    from app.services.vault_files.vault_file_service import VaultFileService
 
 
 @dataclass(frozen=True)
@@ -33,11 +39,11 @@ class _ConflictResolutionTarget:
 
 
 def add_file(
-    service,
-    source,
+    service: "VaultFileService",
+    source: Path,
     dest_name: str | None = None,
     dest_parent_virtual_path: str | None = None,
-):
+) -> "AddFileResult":
     return add_file_to_vault(
         service.context,
         file_service=service._require_file_service(),
@@ -51,8 +57,26 @@ def add_file(
     )
 
 
+def create_folder(
+    service: "VaultFileService",
+    name: str,
+    parent_virtual_path: str = "/",
+):
+    destination_parent_id = service._resolve_or_create_destination_parent_id(
+        parent_virtual_path
+    )
+    created_folder = service._require_folder_service().create_folder(
+        name,
+        destination_parent_id,
+    )
+    event_emitter = service._build_event_emitter()
+    if event_emitter is not None:
+        event_emitter.emit_folder_create(created_folder)
+    return created_folder
+
+
 def copy_entry(
-    service,
+    service: "VaultFileService",
     source_virtual_path: str,
     destination_folder_virtual_path: str = "/",
     new_name: str | None = None,
@@ -79,7 +103,7 @@ def copy_entry(
 
 
 def move_entries(
-    service,
+    service: "VaultFileService",
     source_virtual_paths: list[str],
     destination_folder_virtual_path: str = "/",
 ):
@@ -102,6 +126,11 @@ def move_entries(
     folder_service = service._require_folder_service()
     moving_ids = {entry.id for entry in entries}
     for entry in entries:
+        if entry.is_folder and is_descendant_path(
+            destination_folder_virtual_path,
+            entry.virtual_path,
+        ):
+            raise ValueError("Cannot move a folder into itself or its descendant")
         existing = folder_service.get_child_by_name(destination_parent_id, entry.name)
         if existing is not None and existing.id not in moving_ids:
             raise FileExistsError(
@@ -110,11 +139,6 @@ def move_entries(
 
     moved = []
     for entry in entries:
-        if entry.is_folder and is_descendant_path(
-            destination_folder_virtual_path,
-            entry.virtual_path,
-        ):
-            raise ValueError("Cannot move a folder into itself or its descendant")
         folder_service.rename_entry(entry.id, entry.name, destination_parent_id)
         updated_entry = service._get_entry_by_id(entry.id)
         service._emit_move_event(updated_entry, destination_parent_id, entry.name)
@@ -122,7 +146,7 @@ def move_entries(
     return moved
 
 
-def delete_entries(service, source_virtual_paths: list[str]) -> int:
+def delete_entries(service: "VaultFileService", source_virtual_paths: list[str]) -> int:
     if not source_virtual_paths:
         return 0
 
@@ -131,51 +155,56 @@ def delete_entries(service, source_virtual_paths: list[str]) -> int:
     folder_service = service._require_folder_service()
     event_emitter = service._build_event_emitter()
     orphan_ids: list[int] = []
-    for entry in entries:
-        file_id: str | None = None
-        conflicts_to_resolve: list[_ConflictResolutionTarget] = []
-        if (
-            event_emitter is not None
-            and not entry.is_folder
-            and entry.file_entry_id is not None
-        ):
-            hydrated = service._require_file_service().get_file_reference_with_blobs(
-                entry.id
-            )
-            if hydrated is not None and hydrated.file_entry is not None:
-                file_id = hydrated.file_entry.file_id
-        session_factory = service.context.session_factory
-        if session_factory is not None:
-            with session_scope(session_factory, commit=False) as session:
-                conflicts_to_resolve = _list_active_conflicts_for_entry(
-                    session, entry
+    try:
+        for entry in entries:
+            file_id: str | None = None
+            conflicts_to_resolve: list[_ConflictResolutionTarget] = []
+            if (
+                event_emitter is not None
+                and not entry.is_folder
+                and entry.file_entry_id is not None
+            ):
+                hydrated = (
+                    service._require_file_service().get_file_reference_with_blobs(
+                        entry.id
+                    )
                 )
-        orphan_ids.extend(folder_service.delete_entry(entry.id))
-        if event_emitter is not None:
-            service._emit_delete_event(entry, file_id=file_id)
-            resolution_event_ids = _emit_conflict_resolutions(
-                event_emitter,
-                conflicts_to_resolve,
-                resolution_status="deleted",
-                resolution_reason="explicit_delete",
-            )
-            _resolve_conflicts_locally(
-                session_factory,
-                conflicts_to_resolve,
-                resolution_status="deleted",
-                resolution_event_ids=resolution_event_ids,
-            )
-        elif session_factory is not None:
-            _resolve_conflicts_locally(
-                session_factory,
-                conflicts_to_resolve,
-                resolution_status="deleted",
-            )
-    folder_service.gc.cleanup_batch(orphan_ids)
+                if hydrated is not None and hydrated.file_entry is not None:
+                    file_id = hydrated.file_entry.file_id
+            session_factory = service.context.session_factory
+            if session_factory is not None:
+                with session_scope(session_factory, commit=False) as session:
+                    conflicts_to_resolve = _list_active_conflicts_for_entry(
+                        session, entry
+                    )
+            orphan_ids.extend(folder_service.delete_entry(entry.id))
+            if event_emitter is not None:
+                service._emit_delete_event(entry, file_id=file_id)
+                resolution_event_ids = _emit_conflict_resolutions(
+                    event_emitter,
+                    conflicts_to_resolve,
+                    resolution_status="deleted",
+                    resolution_reason="explicit_delete",
+                )
+                _resolve_conflicts_locally(
+                    session_factory,
+                    conflicts_to_resolve,
+                    resolution_status="deleted",
+                    resolution_event_ids=resolution_event_ids,
+                )
+            elif session_factory is not None:
+                _resolve_conflicts_locally(
+                    session_factory,
+                    conflicts_to_resolve,
+                    resolution_status="deleted",
+                )
+    finally:
+        if orphan_ids:
+            folder_service.gc.cleanup_batch(orphan_ids)
     return len(entries)
 
 
-def rename_entry(service, source_virtual_path: str, new_name: str):
+def rename_entry(service: "VaultFileService", source_virtual_path: str, new_name: str):
     source = service._get_entry_by_virtual_path(source_virtual_path)
     if source is None:
         raise FileNotFoundError(f"Vault entry not found: {source_virtual_path}")
@@ -189,7 +218,7 @@ def rename_entry(service, source_virtual_path: str, new_name: str):
 
 
 def restore_sync_conflict(
-    service,
+    service: "VaultFileService",
     conflict_id: str,
     destination_folder_virtual_path: str = "/",
     new_name: str | None = None,
@@ -263,7 +292,7 @@ def restore_sync_conflict(
 
 
 def export_entries(
-    service,
+    service: "VaultFileService",
     source_virtual_paths: list[str],
     destination_dir: Path,
 ) -> list[Path]:
@@ -282,7 +311,7 @@ def export_entries(
 
 
 def _copy_reference(
-    service,
+    service: "VaultFileService",
     source_ref_id: int,
     destination_parent_id: int | None,
     *,
@@ -316,7 +345,7 @@ def _copy_reference(
 
 
 def _export_reference(
-    service,
+    service: "VaultFileService",
     source_ref_id: int,
     destination_parent: Path,
     *,
@@ -326,6 +355,12 @@ def _export_reference(
     target_path = destination_parent / (override_name or source.name)
     if target_path.exists():
         raise FileExistsError(f"Export destination already exists: {target_path}")
+    destination_root = destination_parent.resolve()
+    target_resolved = target_path.resolve()
+    if not target_resolved.is_relative_to(destination_root):
+        raise ValueError(
+            f"Export target escapes destination directory: {target_path.name}"
+        )
     if source.is_folder:
         target_path.mkdir(parents=True, exist_ok=False)
         for child in service._require_folder_service().get_children(source.id):
@@ -353,12 +388,12 @@ def _export_reference(
 
 
 def _list_active_conflicts_for_entry(
-    session,
+    session: "Session",
     entry: FileReference,
 ) -> list[_ConflictResolutionTarget]:
     node_ids = [entry.node_id]
     if entry.is_folder:
-        escaped_virtual_path = _escape_like_pattern(entry.virtual_path)
+        escaped_virtual_path = escape_like_pattern(entry.virtual_path)
         node_ids.extend(
             session.scalars(
                 select(FileReference.node_id).where(
@@ -437,12 +472,10 @@ def _resolve_conflicts_locally(
                 resolution_event_ids.get(conflict.conflict_id)
                 if resolution_event_ids is not None
                 else None
-            ) or _local_resolution_event_id(conflict.conflict_id, resolution_status)
+            ) or local_resolution_event_id(conflict.conflict_id, resolution_status)
             resolve_sync_conflict(
                 session,
                 conflict_id=conflict.conflict_id,
                 resolution_event_id=resolution_event_id,
                 status=resolution_status,
             )
-
-

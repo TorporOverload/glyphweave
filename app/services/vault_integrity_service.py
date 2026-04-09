@@ -5,11 +5,11 @@ import shutil
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import joinedload, sessionmaker
 
+from app.common.logging import logger
 from app.common.paths.vault_layout import resolve_blob_path
 from app.core.domain.sync.event_types import EventType
 from app.core.domain.sync.models import (
@@ -190,8 +190,21 @@ class VaultIntegrityService:
                         file_id=file_id,
                     )
                     actual_hash = hashlib.sha256(output_path.read_bytes()).hexdigest()
+                except Exception as exc:
+                    issues.append(
+                        VaultIntegrityIssue(
+                            code="corrupt_blob",
+                            message=f"{label} failed decryption: {exc}",
+                        )
+                    )
+                    continue
                 finally:
-                    self._cleanup_temp_dir(temp_dir)
+                    try:
+                        self._cleanup_temp_dir(temp_dir)
+                    except Exception:
+                        logger.warning(
+                            "Failed to clean up temp dir during integrity check"
+                        )
             except Exception as exc:
                 issues.append(
                     VaultIntegrityIssue(
@@ -261,7 +274,9 @@ class VaultIntegrityService:
             db_path = temp_dir / "integrity-rebuild.db"
             engine = create_engine(f"sqlite:///{db_path}")
             Base.metadata.create_all(engine)
-            session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+            session_factory = sessionmaker(
+                bind=engine, autoflush=False, autocommit=False
+            )
             replay_store = _IntegrityReplayStore(discovered=discovered)
             result = replay_vault_events(
                 session_factory=session_factory,
@@ -293,19 +308,31 @@ class VaultIntegrityService:
 
     def _snapshot(self, session_factory: sessionmaker) -> dict[str, set]:
         with session_scope(session_factory, commit=False) as session:
-            refs = session.execute(
-                select(FileReference)
-                .options(
-                    joinedload(FileReference.parent),
-                    joinedload(FileReference.file_entry).joinedload(FileEntry.blobs),
+            refs = (
+                session.execute(
+                    select(FileReference)
+                    .options(
+                        joinedload(FileReference.parent),
+                        joinedload(FileReference.file_entry).joinedload(
+                            FileEntry.blobs
+                        ),
+                    )
+                    .order_by(FileReference.node_id)
                 )
-                .order_by(FileReference.node_id)
-            ).unique().scalars().all()
-            entries = session.execute(
-                select(FileEntry)
-                .options(joinedload(FileEntry.blobs))
-                .order_by(FileEntry.file_id)
-            ).unique().scalars().all()
+                .unique()
+                .scalars()
+                .all()
+            )
+            entries = (
+                session.execute(
+                    select(FileEntry)
+                    .options(joinedload(FileEntry.blobs))
+                    .order_by(FileEntry.file_id)
+                )
+                .unique()
+                .scalars()
+                .all()
+            )
             processed = session.scalars(
                 select(ProcessedEvent).order_by(ProcessedEvent.event_hash)
             ).all()
@@ -320,10 +347,7 @@ class VaultIntegrityService:
             ).all()
 
         return {
-            "refs": {
-                self._snapshot_ref(ref)
-                for ref in refs
-            },
+            "refs": {self._snapshot_ref(ref) for ref in refs},
             "entries": {
                 (
                     entry.file_id,
@@ -392,12 +416,17 @@ class VaultIntegrityService:
         }
 
     @classmethod
-    def _snapshot_ref(cls, ref: FileReference) -> tuple[str, str | None, str, bool, str, str | None]:
+    def _snapshot_ref(
+        cls, ref: FileReference
+    ) -> tuple[str, str | None, str, bool, str, str | None]:
         node_id = str(ref.node_id)
         parent_node_id = str(ref.parent.node_id) if ref.parent is not None else None
         if ref.virtual_path == cls._CONFLICT_FOLDER_PATH:
             node_id = cls._CONFLICT_FOLDER_NODE_ID
-        if ref.parent is not None and ref.parent.virtual_path == cls._CONFLICT_FOLDER_PATH:
+        if (
+            ref.parent is not None
+            and ref.parent.virtual_path == cls._CONFLICT_FOLDER_PATH
+        ):
             parent_node_id = cls._CONFLICT_FOLDER_NODE_ID
         return (
             node_id,
@@ -418,8 +447,12 @@ class VaultIntegrityService:
             rebuilt_values = rebuilt[key]
             if current_values == rebuilt_values:
                 continue
-            only_current = sorted(repr(item) for item in current_values - rebuilt_values)[:3]
-            only_rebuilt = sorted(repr(item) for item in rebuilt_values - current_values)[:3]
+            only_current = sorted(
+                repr(item) for item in current_values - rebuilt_values
+            )[:3]
+            only_rebuilt = sorted(
+                repr(item) for item in rebuilt_values - current_values
+            )[:3]
             issues.append(
                 VaultIntegrityIssue(
                     code="db_mismatch",
@@ -461,7 +494,9 @@ class VaultIntegrityService:
                 payload.file_id,
                 payload.blob_ids,
                 payload.content_hash,
-                f"conflict:{payload.archived_name} ({event.event_hash or event.event_id})",
+                f"conflict:{payload.archived_name} ({
+                    event.event_hash or event.event_id
+                })",
             )
         return None
 
@@ -522,6 +557,5 @@ class _IntegrityReplayStore:
         if not skip_hashes:
             return bool(self._discovered)
         return any(
-            _discovered_event_hash(item) not in skip_hashes
-            for item in self._discovered
+            _discovered_event_hash(item) not in skip_hashes for item in self._discovered
         )

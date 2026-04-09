@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from app.infrastructure.crypto.service.encryption_service import EncryptionService
     from app.infrastructure.persistence.db.service.file_service import FileService
     from app.infrastructure.persistence.db.service.folder_service import FolderService
+    from app.services.sync.event_emitter import EventEmitter
 
 
 def list_fallback_unlocked_files(
@@ -50,6 +51,7 @@ def cleanup_unlocked_files(
     file_service: "FileService",
     folder_service: "FolderService",
     encryption_service: "EncryptionService",
+    event_emitter: "EventEmitter | None" = None,
 ) -> None:
     """Finalize all fallback-open files, unmount FUSE mounts, and dispose the database
     engine."""
@@ -61,6 +63,7 @@ def cleanup_unlocked_files(
                 file_service=file_service,
                 folder_service=folder_service,
                 encryption_service=encryption_service,
+                event_emitter=event_emitter,
                 file_ref_id=file_ref_id,
             )
         except Exception as e:

@@ -20,8 +20,14 @@ from app.infrastructure.persistence.db.service.sync_conflict_service import (
     resolve_sync_conflict,
     upsert_sync_conflict,
 )
-from app.infrastructure.persistence.db.utils import escape_like_pattern as _escape_like_pattern
-from app.services.sync.state import ParentResolutionStatus, build_conflict_info_and_persist, is_conflict_path as _is_conflict_path
+from app.infrastructure.persistence.db.utils import (
+    escape_like_pattern as _escape_like_pattern,
+)
+from app.services.sync.state import (
+    ParentResolutionStatus,
+    build_conflict_info_and_persist,
+    is_conflict_path as _is_conflict_path,
+)
 
 CONFLICT_FOLDER_NAME = ".glyphweave_conflicts"
 
@@ -30,12 +36,12 @@ def handle_folder_create(
     processor, session: Session, event: VaultEvent
 ) -> ProcessingResult:
     parsed = FolderCreateData.from_dict(event.payload)
-    existing_ref = processor._get_ref_by_node_id(session, parsed.node_id)
+    existing_ref = processor.get_ref_by_node_id(session, parsed.node_id)
     if existing_ref is not None:
-        current_structural_hlc = processor._structural_hlc_for_node(
+        current_structural_hlc = processor.structural_hlc_for_node(
             session, parsed.node_id
         )
-        if processor._is_stale_event(event.hlc, current_structural_hlc):
+        if processor.is_stale_event(event.hlc, current_structural_hlc):
             return ProcessingResult(
                 event_id=event.event_id,
                 event_type=event.type.value,
@@ -43,7 +49,7 @@ def handle_folder_create(
                 message="Stale folder_create event",
                 affected_ids=[existing_ref.id],
             )
-        processor._upsert_sync_state(
+        processor.upsert_sync_state(
             session, parsed.node_id, event.hlc, True, False, event.event_id
         )
         return ProcessingResult(
@@ -54,7 +60,7 @@ def handle_folder_create(
             affected_ids=[existing_ref.id],
         )
 
-    if processor._is_deleted_after_or_equal(session, parsed.node_id, event.hlc):
+    if processor.is_deleted_after_or_equal(session, parsed.node_id, event.hlc):
         return ProcessingResult(
             event_id=event.event_id,
             event_type=event.type.value,
@@ -62,7 +68,7 @@ def handle_folder_create(
             message="Folder node already deleted by a newer event",
         )
 
-    resolution = processor._resolve_parent_for_add(
+    resolution = processor.resolve_parent_for_add(
         session, parsed.parent_node_id, event.hlc
     )
     if resolution.status == ParentResolutionStatus.STALE_DELETED_PARENT:
@@ -89,10 +95,10 @@ def handle_folder_create(
     if resolution.status == ParentResolutionStatus.CONFLICT_ARCHIVE or (
         parent is not None and parent.name == CONFLICT_FOLDER_NAME
     ):
-        folder_ref.name = processor._conflict_name(folder_ref.name, event.hlc)
+        folder_ref.name = processor.conflict_name(folder_ref.name, event.hlc)
         session.flush()
         conflict_archived = True
-    processor._upsert_sync_state(
+    processor.upsert_sync_state(
         session, parsed.node_id, event.hlc, True, False, event.event_id
     )
     conflict_info = (
@@ -102,7 +108,8 @@ def handle_folder_create(
             event=event,
             node_kind="folder",
             reason_code="deleted_parent_folder_create",
-            reason_text="Folder create targeted a parent folder that had already been deleted",
+            reason_text=
+            "Folder create targeted a parent folder that had already been deleted",
         )
         if conflict_archived
         else None
@@ -129,15 +136,15 @@ def handle_folder_move(
     processor, session: Session, event: VaultEvent
 ) -> ProcessingResult:
     parsed = FolderMoveData.from_dict(event.payload)
-    if processor._is_deleted_after_or_equal(session, parsed.node_id, event.hlc):
+    if processor.is_deleted_after_or_equal(session, parsed.node_id, event.hlc):
         return ProcessingResult(
             event_id=event.event_id,
             event_type=event.type.value,
             status=ProcessingStatus.SKIPPED_DUPLICATE,
             message="Folder move is older than a delete tombstone",
         )
-    if processor._is_stale_event(
-        event.hlc, processor._structural_hlc_for_node(session, parsed.node_id)
+    if processor.is_stale_event(
+        event.hlc, processor.structural_hlc_for_node(session, parsed.node_id)
     ):
         return ProcessingResult(
             event_id=event.event_id,
@@ -145,7 +152,7 @@ def handle_folder_move(
             status=ProcessingStatus.SKIPPED_DUPLICATE,
             message="Stale folder_move event",
         )
-    folder_ref = processor._get_ref_by_node_id(session, parsed.node_id)
+    folder_ref = processor.get_ref_by_node_id(session, parsed.node_id)
     if folder_ref is None or not folder_ref.is_folder:
         return ProcessingResult(
             event_id=event.event_id,
@@ -154,7 +161,7 @@ def handle_folder_move(
             message="Folder node not found",
         )
 
-    resolution = processor._resolve_parent_for_move(
+    resolution = processor.resolve_parent_for_move(
         session,
         parsed.new_parent_node_id,
         event.hlc,
@@ -173,7 +180,7 @@ def handle_folder_move(
     folder_ref.name = parsed.new_name
     conflict_archived = False
     if resolution.status == ParentResolutionStatus.CONFLICT_ARCHIVE:
-        folder_ref.name = processor._conflict_name(parsed.new_name, event.hlc)
+        folder_ref.name = processor.conflict_name(parsed.new_name, event.hlc)
         conflict_archived = True
     session.flush()
     if not conflict_archived and not _is_conflict_path(folder_ref.virtual_path):
@@ -183,7 +190,7 @@ def handle_folder_move(
             resolution_event_id=event.event_id,
             status="resolved",
         )
-    processor._upsert_sync_state(
+    processor.upsert_sync_state(
         session, parsed.node_id, event.hlc, True, False, event.event_id
     )
     conflict_info = (
@@ -193,7 +200,8 @@ def handle_folder_move(
             event=event,
             node_kind="folder",
             reason_code="deleted_parent_folder_move",
-            reason_text="Folder move targeted a parent folder that had already been deleted",
+            reason_text=(
+                "Folder move targeted a parent folder that had already been deleted"),
         )
         if conflict_archived
         else None
@@ -220,8 +228,8 @@ def handle_folder_delete(
     processor, session: Session, event: VaultEvent
 ) -> ProcessingResult:
     parsed = FolderDeleteData.from_dict(event.payload)
-    if processor._is_stale_event(
-        event.hlc, processor._structural_hlc_for_node(session, parsed.node_id)
+    if processor.is_stale_event(
+        event.hlc, processor.structural_hlc_for_node(session, parsed.node_id)
     ):
         return ProcessingResult(
             event_id=event.event_id,
@@ -229,14 +237,14 @@ def handle_folder_delete(
             status=ProcessingStatus.SKIPPED_DUPLICATE,
             message="Stale folder_delete event",
         )
-    if processor._is_deleted_after_or_equal(session, parsed.node_id, event.hlc):
+    if processor.is_deleted_after_or_equal(session, parsed.node_id, event.hlc):
         return ProcessingResult(
             event_id=event.event_id,
             event_type=event.type.value,
             status=ProcessingStatus.SKIPPED_DUPLICATE,
             message="Folder already deleted by a newer event",
         )
-    folder_ref = processor._get_ref_by_node_id(session, parsed.node_id)
+    folder_ref = processor.get_ref_by_node_id(session, parsed.node_id)
     if folder_ref is None:
         resolve_active_sync_conflicts_for_node_ids(
             session,
@@ -244,8 +252,8 @@ def handle_folder_delete(
             resolution_event_id=event.event_id,
             status="deleted",
         )
-        processor._record_tombstone(session, parsed.node_id, "folder", event)
-        processor._upsert_sync_state(
+        processor.record_tombstone(session, parsed.node_id, "folder", event)
+        processor.upsert_sync_state(
             session, parsed.node_id, event.hlc, True, False, event.event_id
         )
         return ProcessingResult(
@@ -261,9 +269,9 @@ def handle_folder_delete(
         resolution_event_id=event.event_id,
         status="deleted",
     )
-    affected_ids = delete_folder_subtree(session, folder_ref)
-    processor._record_tombstone(session, parsed.node_id, "folder", event)
-    processor._upsert_sync_state(
+    affected_ids = delete_folder_subtree(processor, session, folder_ref, event)
+    processor.record_tombstone(session, parsed.node_id, "folder", event)
+    processor.upsert_sync_state(
         session, parsed.node_id, event.hlc, True, False, event.event_id
     )
     return ProcessingResult(
@@ -291,15 +299,15 @@ def handle_folder_conflict_archive(
     processor, session: Session, event: VaultEvent
 ) -> ProcessingResult:
     parsed = FolderConflictArchiveData.from_dict(event.payload)
-    if processor._is_deleted_after_or_equal(session, parsed.node_id, event.hlc):
+    if processor.is_deleted_after_or_equal(session, parsed.node_id, event.hlc):
         return ProcessingResult(
             event_id=event.event_id,
             event_type=event.type.value,
             status=ProcessingStatus.SKIPPED_DUPLICATE,
             message="Folder conflict archive is older than a newer delete tombstone",
         )
-    if processor._is_stale_event(
-        event.hlc, processor._structural_hlc_for_node(session, parsed.node_id)
+    if processor.is_stale_event(
+        event.hlc, processor.structural_hlc_for_node(session, parsed.node_id)
     ):
         return ProcessingResult(
             event_id=event.event_id,
@@ -308,8 +316,8 @@ def handle_folder_conflict_archive(
             message="Stale folder_conflict_archive event",
         )
 
-    existing_ref = processor._get_ref_by_node_id(session, parsed.node_id)
-    conflict_folder = processor._get_or_create_conflict_folder(session)
+    existing_ref = processor.get_ref_by_node_id(session, parsed.node_id)
+    conflict_folder = processor.get_or_create_conflict_folder(session)
     if existing_ref is None:
         folder_ref = FileReference(
             node_id=parsed.node_id,
@@ -350,7 +358,7 @@ def handle_folder_conflict_archive(
         origin_device_id=parsed.origin_device_id or event.device_id,
         status="active",
     )
-    processor._upsert_sync_state(
+    processor.upsert_sync_state(
         session, parsed.node_id, event.hlc, True, False, event.event_id
     )
     return ProcessingResult(
@@ -389,7 +397,12 @@ def handle_folder_conflict_resolved(
     )
 
 
-def delete_folder_subtree(session: Session, folder_ref: FileReference) -> list[int]:
+def delete_folder_subtree(
+    processor,
+    session: Session,
+    folder_ref: FileReference,
+    event: VaultEvent,
+) -> list[int]:
     descendant_refs = session.scalars(
         select(FileReference).where(
             FileReference.virtual_path.like(
@@ -399,10 +412,16 @@ def delete_folder_subtree(session: Session, folder_ref: FileReference) -> list[i
         )
     ).all()
     affected_ids = [folder_ref.id, *[ref.id for ref in descendant_refs]]
+    descendant_tombstones = [
+        (descendant.node_id, "folder" if descendant.is_folder else "file")
+        for descendant in descendant_refs
+    ]
     for descendant in descendant_refs:
         session.delete(descendant)
     session.delete(folder_ref)
     session.flush()
+    for node_id, node_kind in descendant_tombstones:
+        processor.record_tombstone(session, node_id, node_kind, event)
     return affected_ids
 
 

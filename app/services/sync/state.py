@@ -53,10 +53,6 @@ def build_conflict_info_and_persist(
     file_entry_id: int | None = None,
 ) -> dict:
     """Build a conflict info dict and persist a SyncConflict record.
-
-    Centralises the repeated pattern of building the conflict metadata dict
-    and calling ``upsert_sync_conflict`` that appears across file and folder
-    conflict-archive handlers.
     """
     from app.infrastructure.persistence.db.service.sync_conflict_service import (
         upsert_sync_conflict,
@@ -102,7 +98,7 @@ def get_ref_by_node_id(session: Session, node_id: str) -> FileReference | None:
 
 
 def get_parent_ref(
-    processor, session: Session, parent_node_id: str | None
+    session: Session, parent_node_id: str | None
 ) -> FileReference | None:
     if parent_node_id is None:
         return None
@@ -137,7 +133,7 @@ def resolve_parent_for_add(
     }
     if compare_hlc(event_hlc.to_dict(), tombstone_hlc) > 0:
         return ParentResolution(
-            parent=processor._get_or_create_conflict_folder(session),
+            parent=processor.get_or_create_conflict_folder(session),
             status=ParentResolutionStatus.CONFLICT_ARCHIVE,
         )
     return ParentResolution(
@@ -174,7 +170,7 @@ def resolve_parent_for_move(
     }
     if compare_hlc(event_hlc.to_dict(), tombstone_hlc) > 0:
         return ParentResolution(
-            parent=processor._get_or_create_conflict_folder(session),
+            parent=processor.get_or_create_conflict_folder(session),
             status=ParentResolutionStatus.CONFLICT_ARCHIVE,
         )
 

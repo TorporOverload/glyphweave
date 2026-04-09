@@ -11,6 +11,7 @@ from app.services.content.indexing_service import IndexingService
 from app.services.models import AddFileResult, VaultContext
 from app.common.paths.vault_layout import resolve_blob_path
 from app.common.logging import logger
+from app.services.vault_files.helpers import normalize_vault_path
 
 if TYPE_CHECKING:
     from app.infrastructure.crypto.service.encryption_service import EncryptionService
@@ -158,26 +159,6 @@ def _cleanup_partial_blobs(vault_path: Path, blob_ids: list[str]) -> None:
                 blob_path.unlink()
         except OSError:
             pass
-
-
-def _normalize_vault_dir_path(path: str | None) -> str:
-    """Normalize a virtual directory path for vault storage."""
-    if path is None:
-        return "/"
-
-    normalized = path.strip().replace("\\", "/")
-    if not normalized:
-        return "/"
-
-    parts = [segment for segment in normalized.split("/") if segment not in {"", "."}]
-    if any(segment == ".." for segment in parts):
-        raise ValueError("Parent traversal ('..') is not allowed in destination path")
-
-    if not parts:
-        return "/"
-    return "/" + "/".join(parts)
-
-
 def _resolve_or_create_parent_folder(
     folder_service: "FolderService | None",
     dest_parent_virtual_path: str | None,
@@ -186,7 +167,7 @@ def _resolve_or_create_parent_folder(
     """Resolve or create the parent folder for a given virtual path.
     Parents will be created as needed.
     Returns the parent folder ID, or None for root."""
-    parent_virtual_path = _normalize_vault_dir_path(dest_parent_virtual_path)
+    parent_virtual_path = normalize_vault_path(dest_parent_virtual_path)
     if parent_virtual_path == "/":
         return None
 
