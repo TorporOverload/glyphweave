@@ -311,7 +311,7 @@ class TestSingleFileFS:
         monkeypatch,
         temp_vault_path,
     ):
-        """Encrypted writes should stage plaintext under the runtime cache only."""
+        """Encrypted writes pass plaintext via BytesIO buffer to encryption service."""
         captured = {}
 
         def fake_encrypt_file(
@@ -323,11 +323,8 @@ class TestSingleFileFS:
             file_id,
         ):
             del master_key, vault_id, file_id
-            captured["file_path"] = Path(file_path)
-            captured["vault_path"] = Path(vault_path)
-            assert captured["file_path"].parent == chunk_store.cache_dir / ".tmp"
-            assert captured["vault_path"] == temp_vault_path
-            assert captured["file_path"].exists()
+            captured["file_path"] = file_path
+            captured["vault_path"] = vault_path
             return []
 
         monkeypatch.setattr(
@@ -348,8 +345,11 @@ class TestSingleFileFS:
             mime_type="text/plain",
         )
 
-        assert captured["file_path"].parent == chunk_store.cache_dir / ".tmp"
-        assert not captured["file_path"].exists()
+        from io import BytesIO
+
+        assert isinstance(captured["file_path"], BytesIO)
+        assert captured["file_path"].getvalue() == b"runtime plaintext"
+        assert captured["vault_path"] == temp_vault_path
         assert not (temp_vault_path / "blobs" / ".tmp").exists()
 
     def test_release_keeps_wal_pending_when_blob_flush_fails(

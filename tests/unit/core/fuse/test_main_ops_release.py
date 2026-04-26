@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from types import SimpleNamespace
 
 from app.infrastructure.fuse.single_fs.main_ops import release_op
@@ -51,6 +52,7 @@ def test_release_op_emits_file_update_after_successful_flush() -> None:
 
     fs = SimpleNamespace(
         _temp_file_handles={},
+        _temp_lock=threading.Lock(),
         handle_manager=_HandleManager(handle),
         file_id="old-file",
         file_ref_id=42,
@@ -88,6 +90,7 @@ def test_release_op_skips_emit_when_file_entry_is_unchanged() -> None:
 
     fs = SimpleNamespace(
         _temp_file_handles={},
+        _temp_lock=threading.Lock(),
         handle_manager=_HandleManager(handle),
         file_id="same-file",
         file_ref_id=7,

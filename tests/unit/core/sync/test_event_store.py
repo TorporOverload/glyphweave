@@ -1,6 +1,8 @@
 import json
+from pathlib import Path
 
 import pytest
+from cryptography.exceptions import InvalidTag
 
 from app.core.domain.sync.event_types import EventType
 from app.core.domain.sync.hashing import (
@@ -80,6 +82,11 @@ def test_append_event_writes_encrypted_object_and_updates_frontier(tmp_path) -> 
     assert payload["mode"] == "encrypted"
     assert "ciphertext" in payload
     assert store.read_frontier("device-a") == [stored.event_hash]
+    frontier_payload = json.loads(
+        store.root_path("device-a").read_text(encoding="utf-8")
+    )
+    assert frontier_payload["mode"] == "encrypted"
+    assert frontier_payload["kind"] == "frontier"
 
 
 def test_append_event_writes_plaintext_envelope_when_encryption_disabled(
@@ -94,6 +101,37 @@ def test_append_event_writes_plaintext_envelope_when_encryption_disabled(
     )
     assert payload["mode"] == "plaintext"
     assert payload["event"]["event_id"] == stored.event_id
+    frontier_payload = json.loads(
+        store.root_path("device-a").read_text(encoding="utf-8")
+    )
+    assert frontier_payload == {
+        "alias": "",
+        "device_id": "device-a",
+        "frontier": [stored.event_hash],
+        "updated_at": frontier_payload["updated_at"],
+    }
+
+
+def test_write_frontier_persists_alias_in_plaintext_mode(tmp_path) -> None:
+    store = _store(tmp_path / "vault", encryption_enabled=False)
+
+    store.write_frontier("device-a", ["hash-1"], alias="Work Laptop")
+
+    payload = json.loads(store.root_path("device-a").read_text(encoding="utf-8"))
+    assert payload["device_id"] == "device-a"
+    assert payload["alias"] == "Work Laptop"
+    assert payload["frontier"] == ["hash-1"]
+    assert store.read_frontier_record("device-a")["alias"] == "Work Laptop"
+
+
+def test_append_event_preserves_existing_frontier_alias(tmp_path) -> None:
+    store = _store(tmp_path / "vault", encryption_enabled=False)
+    store.write_frontier("device-a", ["hash-1"], alias="Work Laptop")
+
+    stored = store.append_event(_event("evt-2"))
+
+    assert store.read_frontier("device-a") == [stored.event_hash]
+    assert store.read_frontier_record("device-a")["alias"] == "Work Laptop"
 
 
 def test_load_event_round_trips_encrypted_event(tmp_path) -> None:
@@ -120,8 +158,13 @@ def test_discover_events_returns_all_valid_encrypted_objects(tmp_path) -> None:
     ]
 
 
-def test_load_event_supports_legacy_plaintext_objects(tmp_path) -> None:
-    legacy_store = EventStore(tmp_path / "vault")
+def test_event_store_rejects_bare_path() -> None:
+    with pytest.raises(TypeError):
+        EventStore(Path("/tmp/fake-vault"))  # type: ignore[arg-type]
+
+
+def test_load_event_supports_plaintext_envelopes_when_encryption_disabled(tmp_path) -> None:
+    legacy_store = _store(tmp_path / "vault", encryption_enabled=False)
     stored = legacy_store.append_event(_event())
 
     encrypted_capable = _store(tmp_path / "vault")
@@ -159,7 +202,7 @@ def test_load_event_raises_when_encrypted_object_is_tampered(tmp_path) -> None:
     payload["ciphertext"] = payload["ciphertext"][:-4] + "AAAA"
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
-    with pytest.raises(Exception):
+    with pytest.raises(InvalidTag):
         store.load_event(stored.event_hash or "")
 
 

@@ -23,6 +23,7 @@ def test_database_encryption(tmp_path):
     print("=" * 70)
 
     db = DbBase(vault_id, test_key, vaults_data_dir=tmp_path)
+    db.initialize_schema()
     session = db.get_session()
 
     print(f"\nRegistered models in Base.metadata: {list(Base.metadata.tables.keys())}")
@@ -120,6 +121,27 @@ def test_database_encryption(tmp_path):
     print(f"You can inspect it with: sqlcipher {db_path}")
     print(f"Then run: PRAGMA key = \"x'{test_key}'\"; SELECT * FROM sqlite_master;")  # noqa
     print("=" * 70 + "\n")
+
+
+def test_db_base_init_does_not_create_schema(tmp_path):
+    vault_id = "test_vault"
+    test_key = "2DD29CA851E7B56E4697B0E1F08507293D761A05CE4D1B628663F411A8086D99"
+
+    db = DbBase(vault_id, test_key, vaults_data_dir=tmp_path)
+
+    with db.engine.connect() as conn:
+        result = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))
+        tables = [row[0] for row in result]
+
+    assert tables == []
+
+    db.initialize_schema()
+
+    with db.engine.connect() as conn:
+        result = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))
+        tables = [row[0] for row in result]
+
+    assert "file_entry" in tables
 
 
 if __name__ == "__main__":

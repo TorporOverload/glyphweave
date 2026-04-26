@@ -110,7 +110,7 @@ def test_event_emitter_observes_existing_remote_hlc_on_startup(
         parents=[],
     )
     store.append_event(remote_event)
-    monkeypatch.setattr(hlc_module.time, "time", lambda: 1.0)
+    monkeypatch.setattr(hlc_module.time, "time", lambda: 0.002)
 
     emitter = EventEmitter(store=store, app_data_dir=app_data_dir)
     local_event = emitter.emit_folder_create(
@@ -119,7 +119,7 @@ def test_event_emitter_observes_existing_remote_hlc_on_startup(
 
     assert local_event.hlc == HybridLogicalClock(
         wall_time=2000,
-        logical=6,
+        logical=1,
         device_id="device-a",
     )
 
@@ -152,7 +152,7 @@ def test_event_emitter_seeds_hlc_from_frontier_heads_without_full_scan(
             AssertionError("unexpected full scan")
         ),
     )
-    monkeypatch.setattr(hlc_module.time, "time", lambda: 1.0)
+    monkeypatch.setattr(hlc_module.time, "time", lambda: 0.002)
 
     emitter = EventEmitter(store=store, app_data_dir=app_data_dir)
     local_event = emitter.emit_folder_create(
@@ -161,7 +161,7 @@ def test_event_emitter_seeds_hlc_from_frontier_heads_without_full_scan(
 
     assert local_event.hlc == HybridLogicalClock(
         wall_time=2000,
-        logical=6,
+        logical=1,
         device_id="device-a",
     )
 
@@ -200,3 +200,59 @@ def test_event_emitter_processes_local_event_and_refreshes_checkpoint(tmp_path) 
         replay_checkpoint_path(local_data_path).read_text(encoding="utf-8")
     )
     assert checkpoint["frontier"] == [event.event_hash]
+
+
+def test_event_emitter_preserves_existing_frontier_alias(tmp_path) -> None:
+    app_data_dir = tmp_path / "app"
+    app_data_dir.mkdir(parents=True, exist_ok=True)
+    (app_data_dir / "device.json").write_text(
+        json.dumps(
+            {"device_id": "device-a", "alias": "Global Alias", "status": "active"}
+        ),
+        encoding="utf-8",
+    )
+    vault_path = tmp_path / "vault"
+    store = _store(vault_path)
+    store.write_frontier_alias("device-a", "Vault Alias")
+
+    emitter = EventEmitter(store=store, app_data_dir=app_data_dir)
+    event = emitter.emit_folder_create(
+        _Entry(name="docs", node_id="folder-1", is_folder=True)
+    )
+
+    assert event.event_hash is not None
+    assert store.read_frontier_record("device-a")["alias"] == "Vault Alias"
+
+
+def test_event_emitter_file_conflict_archive_includes_parent_node_id(tmp_path) -> None:
+    app_data_dir = tmp_path / "app"
+    app_data_dir.mkdir(parents=True, exist_ok=True)
+    (app_data_dir / "device.json").write_text(
+        json.dumps({"device_id": "device-a", "name": "A", "status": "active"}),
+        encoding="utf-8",
+    )
+    vault_path = tmp_path / "vault"
+    store = _store(vault_path)
+    emitter = EventEmitter(store=store, app_data_dir=app_data_dir)
+
+    parent = _Entry(name=".glyphweave_conflicts", node_id="conflicts", is_folder=True)
+    child = _Entry(
+        name="report.txt.conflict",
+        node_id="node-1",
+        parent=parent,
+        file_entry=_FileEntry(),
+    )
+
+    event = emitter.emit_file_conflict_archive(
+        child,
+        child.file_entry,
+        "report.txt.conflict",
+        conflict_id="conflict-1",
+        reason_code="deleted_parent_move",
+        reason_text="File moved into a deleted parent",
+        trigger_event_id="evt-1",
+        trigger_event_type="file_move",
+        trigger_device_id="device-b",
+    )
+
+    assert event.payload["parent_node_id"] == "conflicts"

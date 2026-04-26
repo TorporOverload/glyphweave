@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 from pathlib import Path
 
 
@@ -32,10 +33,28 @@ def _atomic_write(
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(tmp_name, path)
+        _replace_with_retry(tmp_name, path)
     except BaseException:
         try:
             os.unlink(tmp_name)
         except OSError:
             pass
         raise
+
+
+def _replace_with_retry(
+    src: str, dst: Path, retries: int = 5, delay: float = 0.05
+) -> None:
+    """Retry os.replace on PermissionError.
+
+    On Windows, AV scanners or concurrent readers can briefly hold the
+    destination file open, causing os.replace to fail with WinError 5.
+    """
+    for attempt in range(retries):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt == retries - 1:
+                raise
+            time.sleep(delay)

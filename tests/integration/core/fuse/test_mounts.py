@@ -160,6 +160,33 @@ class TestMountsRecovery:
         # Orphan blob should be cleaned up
         assert not (temp_store.tmp_dir / f"{orphan_blob}.enc").exists()
 
+    def test_recovery_cleans_up_stale_mount_directories(
+        self,
+        temp_vault_path,
+        temp_runtime_cache_dir,
+        session_factory,
+        key_service,
+        test_vault_id,
+        test_master_key,
+    ):
+        """Test that recovery removes stale mount directories from a crashed session."""
+        cache_dir = temp_runtime_cache_dir
+        stale_mount = cache_dir / "fuse-mounts" / "ref_123"
+        stale_mount.mkdir(parents=True)
+        (stale_mount / "leftover.txt").write_text("stale", encoding="utf-8")
+
+        FuseOrchestrator(
+            cache_dir=cache_dir,
+            vault_path=temp_vault_path,
+            session_factory=session_factory,
+            key_service=key_service,
+            vault_id=test_vault_id,
+            master_key=test_master_key,
+            auto_recover=True,
+        )
+
+        assert not stale_mount.exists()
+
     def test_recovery_with_valid_pending_entries(
         self,
         temp_vault_path,

@@ -5,6 +5,7 @@ import uuid
 from pathlib import Path
 from threading import Timer
 from typing import Callable
+from types import SimpleNamespace
 
 import sqlcipher3
 from sqlalchemy import create_engine
@@ -20,9 +21,11 @@ from app.infrastructure.persistence.db_dump_service import (
     load_device_id,
     restore_latest_db_dump,
 )
+from app.common.device_id import resolve_device_alias, set_device_alias
 from app.infrastructure.persistence.event_store import EventStore
 from app.infrastructure.persistence.event_store_config import EventStoreConfig
 from app.core.domain.sync.event_types import EventType
+from app.core.domain.sync.models import HybridLogicalClock
 
 
 def _store(vault_path: Path) -> EventStore:
@@ -44,7 +47,22 @@ def test_load_device_id_generates_and_persists_uuid_when_missing(
     assert uuid.UUID(device_id).version == 4
     payload = json.loads((tmp_path / "device.json").read_text(encoding="utf-8"))
     assert payload["device_id"] == device_id
+    assert payload["alias"] == ""
+    assert payload["global_aliases"] == {}
     assert payload["status"] == "active"
+
+
+def test_set_device_alias_persists_local_and_remote_names(tmp_path: Path) -> None:
+    device_id = load_device_id(tmp_path)
+
+    assert set_device_alias(tmp_path, device_id, "My Desktop") == "My Desktop"
+    assert set_device_alias(tmp_path, "device-b", "Work Laptop") == "Work Laptop"
+    assert resolve_device_alias(tmp_path, device_id) == "My Desktop"
+    assert resolve_device_alias(tmp_path, "device-b") == "Work Laptop"
+
+    cleared = set_device_alias(tmp_path, "device-b", None)
+    assert cleared is None
+    assert resolve_device_alias(tmp_path, "device-b") is None
 
 
 def test_db_dump_service_creates_initial_dump_with_event(
@@ -85,6 +103,55 @@ def test_db_dump_service_creates_initial_dump_with_event(
     assert len(discovered) == 1
     assert discovered[0].event.type == EventType.DB_DUMP_CREATED
     assert discovered[0].event.payload["dump_name"] == dump_path.name
+
+
+def test_db_dump_service_observes_only_frontier_heads(
+    monkeypatch, tmp_path: Path
+) -> None:
+    vault_path = tmp_path / "vault"
+    db_path = tmp_path / "vaults" / "vault-1" / "vault.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    db_path.write_bytes(b"x" * 1024)
+    store = _store(vault_path)
+
+    head_hashes = {"head-a", "head-b"}
+    loaded_hashes: list[str] = []
+    observed: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        store,
+        "discover_events",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("unexpected full event scan")
+        ),
+    )
+    monkeypatch.setattr(store, "iter_frontier_hashes", lambda: head_hashes)
+
+    def _load_event(event_hash: str):
+        loaded_hashes.append(event_hash)
+        wall_time = 1000 if event_hash == "head-a" else 2000
+        return SimpleNamespace(
+            hlc=HybridLogicalClock(
+                wall_time=wall_time,
+                logical=0,
+                device_id=event_hash,
+            )
+        )
+
+    monkeypatch.setattr(store, "load_event", _load_event)
+    service = DBDumpService(
+        vault_path=vault_path,
+        db_path=db_path,
+        db_key_hex="ab" * 32,
+        device_id="device-1",
+        event_store=store,
+    )
+    monkeypatch.setattr(service._clock, "observe", lambda value: observed.append(value))
+
+    service._observe_existing_events()
+
+    assert set(loaded_hashes) == head_hashes
+    assert observed == [{"wall_time": 2000, "logical": 0, "device_id": "head-b"}]
 
 
 def test_db_dump_service_skips_until_threshold_crossed(

@@ -1,7 +1,12 @@
 import pytest
 
 from app.infrastructure.crypto.service import KeyService
-from app.infrastructure.crypto.types import KDFParams, KeyPurpose, VaultKeyFile, WrappedKey
+from app.infrastructure.crypto.types import (
+    KDFParams,
+    KeyPurpose,
+    VaultKeyFile,
+    WrappedKey,
+)
 from app.common.exceptions.crypto import InvalidPasswordError
 
 
@@ -102,5 +107,5 @@ class TestKeyService:
 
         assert isinstance(db_key, str)
         assert len(db_key) == 64
-        assert isinstance(file_key, bytes)
+        assert isinstance(file_key, (bytes, bytearray))
         assert len(file_key) == 32

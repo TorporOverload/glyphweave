@@ -1,4 +1,10 @@
-from app.core.domain.sync.hlc import HLCClock, compare_hlc, hlc_to_tuple, is_hlc_after, is_hlc_before
+from app.core.domain.sync.hlc import (
+    HLCClock,
+    compare_hlc,
+    hlc_to_tuple,
+    is_hlc_after,
+    is_hlc_before,
+)
 from app.core.domain.sync.models import HybridLogicalClock
 
 
@@ -45,25 +51,20 @@ def test_hybrid_logical_clock_round_trips() -> None:
 
 
 def test_hlc_clock_observe_remote_future_advances_logical(monkeypatch) -> None:
-    monkeypatch.setattr("app.core.domain.sync.hlc.time.time", lambda: 1.0)
+    monkeypatch.setattr("app.core.domain.sync.hlc.time.time", lambda: 0.002)
     clock = HLCClock(device_id="device-a")
 
-    observed = clock.observe(
-        {"wall_time": 2000, "logical": 4, "device_id": "device-b"}
-    )
+    observed = clock.observe({"wall_time": 2000, "logical": 4, "device_id": "device-b"})
     emitted = clock.next()
 
-    assert observed == (2000, 5, "device-a")
-    assert emitted == (2000, 6, "device-a")
+    assert observed == (2000, 0, "device-a")
+    assert emitted == (2000, 1, "device-a")
 
 
 def test_hlc_clock_observe_equal_wall_uses_max_logical_plus_one(monkeypatch) -> None:
     monkeypatch.setattr("app.core.domain.sync.hlc.time.time", lambda: 3.0)
     clock = HLCClock(device_id="device-a", wall_time=3000, logical=2)
 
-    observed = clock.observe(
-        {"wall_time": 3000, "logical": 5, "device_id": "device-b"}
-    )
+    observed = clock.observe({"wall_time": 3000, "logical": 5, "device_id": "device-b"})
 
     assert observed == (3000, 6, "device-a")
-

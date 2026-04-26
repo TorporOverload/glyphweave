@@ -5,6 +5,8 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from sqlalchemy.exc import IntegrityError
+
 from app.infrastructure.crypto.service.utils import compute_hash
 from app.infrastructure.persistence.db.model.extraction_status import ExtractionStatus
 from app.services.content.indexing_service import IndexingService
@@ -95,14 +97,46 @@ def add_file(
         mime_type, _ = mimetypes.guess_type(source.name)
         mime_type = mime_type or "application/octet-stream"
 
-        file_entry = file_service.create_file_entry_with_blobs(
-            file_id=file_id,
-            content_hash=content_hash,
-            mime_type=mime_type,
-            encrypted_size=encrypted_size,
-            original_size=original_size,
-            blob_ids=blob_ids,
-        )
+        try:
+            file_entry = file_service.create_file_entry_with_blobs(
+                file_id=file_id,
+                content_hash=content_hash,
+                mime_type=mime_type,
+                encrypted_size=encrypted_size,
+                original_size=original_size,
+                blob_ids=blob_ids,
+            )
+        except IntegrityError:
+            # Another thread won the race for this content_hash.
+            # Clean up our redundant blobs and reuse the winning entry.
+            _cleanup_partial_blobs(vault_path, blob_ids)
+            blob_ids = []
+            existing_entry = file_service.find_by_content_hash(content_hash)
+            if existing_entry is None:
+                raise
+            logger.info(
+                f"Import deduplicated (concurrent): destination={destination_name}, "
+                f"existing_entry_id={existing_entry.id}"
+            )
+            created_ref = file_service.create_file_reference(
+                name=destination_name,
+                parent_id=parent_id,
+                file_entry_id=existing_entry.id,
+            )
+            if event_emitter is not None:
+                event_emitter.emit_file_add(created_ref)
+            return AddFileResult(
+                file_name=destination_name,
+                deduplicated=True,
+                file_id=None,
+                original_size=existing_entry.original_size_bytes,
+                encrypted_size=existing_entry.encrypted_size_bytes,
+                blob_count=0,
+                indexed=(
+                    getattr(existing_entry, "text_extraction_status", None)
+                    == ExtractionStatus.DONE.value
+                ),
+            )
         file_entry_created = True
         logger.info(
             f"Import encrypted and stored: destination={destination_name}, "

@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 from app.services.content.metadata_service import FileMetadataService
 
@@ -31,3 +32,9 @@ def test_extract_returns_basic_metadata_for_unsupported_file(tmp_path: Path) -> 
     assert result.metadata["mime_type"] == "image/png"
     assert result.metadata["size_bytes"] == 6
     assert result.metadata["text_extraction_supported"] is False
+
+
+def test_created_timestamp_falls_back_when_birthtime_is_unavailable() -> None:
+    stat_result = SimpleNamespace(st_ctime=123.0)
+
+    assert FileMetadataService._created_timestamp(stat_result) == 123.0

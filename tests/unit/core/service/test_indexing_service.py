@@ -218,6 +218,71 @@ def test_extraction_service_marks_invalid_pdf_parse_as_unsupported(
     assert result.unsupported is True
 
 
+def test_extraction_service_marks_password_protected_pdf_as_unsupported(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "protected.pdf"
+    source.write_bytes(b"%PDF-1.4\n")
+
+    def _raise(_path: Path):
+        raise RuntimeError(
+            "ParsingError: PDF is password-protected: PDF is password-protected"
+        )
+
+    monkeypatch.setattr(
+        "app.services.content.extraction_service._run_kreuzberg_extraction",
+        _raise,
+    )
+
+    result = ExtractionService.extract(source)
+
+    assert result.error is not None
+    assert result.unsupported is True
+
+
+def test_extraction_service_marks_password_protected_docx_as_unsupported(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "protected.docx"
+    source.write_bytes(b"PK\x03\x04")
+
+    def _raise(_path: Path):
+        raise RuntimeError("ParsingError: DOCX is password-protected")
+
+    monkeypatch.setattr(
+        "app.services.content.extraction_service._run_kreuzberg_extraction",
+        _raise,
+    )
+
+    result = ExtractionService.extract(source)
+
+    assert result.error is not None
+    assert result.unsupported is True
+
+
+def test_extraction_service_marks_encrypted_xlsx_as_unsupported(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "protected.xlsx"
+    source.write_bytes(b"PK\x03\x04")
+
+    def _raise(_path: Path):
+        raise RuntimeError("ParsingError: Encrypted workbook")
+
+    monkeypatch.setattr(
+        "app.services.content.extraction_service._run_kreuzberg_extraction",
+        _raise,
+    )
+
+    result = ExtractionService.extract(source)
+
+    assert result.error is not None
+    assert result.unsupported is True
+
+
 def test_index_file_entry_skips_when_no_blobs(tmp_path: Path) -> None:
     service, encryption_service = _make_service(tmp_path)
     entry = _make_entry(blob_ids=[])

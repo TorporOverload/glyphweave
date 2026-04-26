@@ -1,5 +1,6 @@
 import pytest
 import os
+import io
 from pathlib import Path
 
 from app.infrastructure.crypto.service import EncryptionService
@@ -43,6 +44,17 @@ class TestEncryptionService:
         with pytest.raises(FileNotFoundError):
             service.encrypt_file(
                 Path("non_existent_file"), vault_path, master_key, vault_id, file_id
+            )
+
+    def test_encrypt_file_unseekable_stream_preserves_error_message(
+        self, service, vault_path, master_key, vault_id, file_id
+    ):
+        unseekable = io.BytesIO(b"data")
+        unseekable.seekable = lambda: False
+
+        with pytest.raises(ValueError, match="seekable"):
+            service.encrypt_file(
+                unseekable, vault_path, master_key, vault_id, file_id
             )
 
     def test_encrypt_decrypt_small_file(

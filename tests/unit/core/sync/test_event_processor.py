@@ -5,11 +5,20 @@ from app.infrastructure.persistence.db.base import Base
 from app.infrastructure.persistence.db.model.file_entry import FileEntry
 from app.infrastructure.persistence.db.model.file_reference import FileReference
 from app.infrastructure.persistence.db.model.processed_event import ProcessedEvent
+from app.infrastructure.persistence.db.model.sync_conflict import SyncConflict
 from app.infrastructure.persistence.db.model.sync_node_state import SyncNodeState
 from app.infrastructure.persistence.db.model.sync_tombstone import SyncTombstone
+from app.infrastructure.persistence.db.service.sync_conflict_service import (
+    upsert_sync_conflict,
+)
 from app.services.sync.event_processor import EventProcessor
 from app.core.domain.sync.event_types import EventType
-from app.core.domain.sync.models import DiscoveredEvent, HybridLogicalClock, VaultEvent
+from app.core.domain.sync.models import (
+    DiscoveredEvent,
+    HybridLogicalClock,
+    ProcessingStatus,
+    VaultEvent,
+)
 
 
 def _build_processor(tmp_path):
@@ -212,6 +221,60 @@ def test_process_discovered_event_wraps_process_event(tmp_path) -> None:
     assert result.status.value == "success"
 
 
+def test_failed_handler_is_not_recorded_as_processed(tmp_path, monkeypatch) -> None:
+    processor, session_factory = _build_processor(tmp_path)
+    event = _event(
+        "evt-folder",
+        EventType.FOLDER_CREATE,
+        {"node_id": "folder-1", "parent_node_id": None, "name": "docs"},
+    )
+
+    def _raise(*_args, **_kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(processor, "_handle_folder_create", _raise)
+
+    result = processor.process_event(event)
+
+    assert result.status == ProcessingStatus.FAILED
+    with session_factory() as session:
+        processed = session.scalars(select(ProcessedEvent)).all()
+        assert processed == []
+
+
+def test_failed_handler_rolls_back_partial_writes(tmp_path, monkeypatch) -> None:
+    processor, session_factory = _build_processor(tmp_path)
+    event = _event(
+        "evt-folder",
+        EventType.FOLDER_CREATE,
+        {"node_id": "folder-1", "parent_node_id": None, "name": "docs"},
+    )
+
+    def _write_then_raise(session, *_args, **_kwargs):
+        session.add(
+            FileReference(
+                node_id="folder-1",
+                parent=None,
+                name="docs",
+                is_folder=True,
+                file_entry_id=None,
+            )
+        )
+        session.flush()
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(processor, "_handle_folder_create", _write_then_raise)
+
+    result = processor.process_event(event)
+
+    assert result.status == ProcessingStatus.FAILED
+    with session_factory() as session:
+        refs = session.scalars(select(FileReference)).all()
+        processed = session.scalars(select(ProcessedEvent)).all()
+        assert refs == []
+        assert processed == []
+
+
 def test_stale_file_move_is_skipped(tmp_path) -> None:
     processor, session_factory = _build_processor(tmp_path)
     processor.process_event(
@@ -337,7 +400,369 @@ def test_late_file_add_under_deleted_folder_is_archived(tmp_path) -> None:
         assert archived.name.startswith("report.txt.conflict.3000.0.device-a")
 
 
-def test_local_file_add_replay_seeds_sync_state_when_row_already_exists(tmp_path) -> None:
+def test_file_move_out_of_conflict_folder_resolves_active_conflict(tmp_path) -> None:
+    processor, session_factory = _build_processor(tmp_path)
+    processor.process_event(
+        _event(
+            "evt-deleted-parent",
+            EventType.FOLDER_CREATE,
+            {"node_id": "folder-deleted", "parent_node_id": None, "name": "deleted"},
+        )
+    )
+    processor.process_event(
+        _event(
+            "evt-live-parent",
+            EventType.FOLDER_CREATE,
+            {"node_id": "folder-live", "parent_node_id": None, "name": "live"},
+        )
+    )
+    processor.process_event(
+        _event(
+            "evt-file-add",
+            EventType.FILE_ADD,
+            {
+                "node_id": "file-1",
+                "file_id": "content-1",
+                "parent_node_id": None,
+                "name": "report.txt",
+                "blob_ids": ["blob-1.enc"],
+                "content_hash": "content-hash-1",
+                "mime_type": "text/plain",
+                "file_size_bytes": 5,
+                "encrypted_size_bytes": 11,
+                "metadata_json": None,
+            },
+        )
+    )
+    processor.process_event(
+        _event(
+            "evt-delete-parent",
+            EventType.FOLDER_DELETE,
+            {"node_id": "folder-deleted", "cascade": True},
+        )
+    )
+    archived = processor.process_event(
+        _event(
+            "evt-file-conflict",
+            EventType.FILE_MOVE,
+            {
+                "node_id": "file-1",
+                "new_parent_node_id": "folder-deleted",
+                "new_name": "report.txt",
+            },
+        )
+    )
+
+    restored = processor.process_event(
+        _event(
+            "evt-file-restore",
+            EventType.FILE_MOVE,
+            {
+                "node_id": "file-1",
+                "new_parent_node_id": "folder-live",
+                "new_name": "restored.txt",
+            },
+        )
+    )
+
+    assert archived.status.value == "conflict_archived"
+    assert restored.status.value == "success"
+    with session_factory() as session:
+        ref = session.scalar(
+            select(FileReference).where(FileReference.node_id == "file-1")
+        )
+        conflict = session.scalar(
+            select(SyncConflict).where(SyncConflict.node_id == "file-1")
+        )
+        assert ref is not None
+        assert ref.virtual_path == "/live/restored.txt"
+        assert conflict is not None
+        assert conflict.status == "resolved"
+
+
+def test_file_delete_marks_active_conflict_deleted(tmp_path) -> None:
+    processor, session_factory = _build_processor(tmp_path)
+    processor.process_event(
+        _event(
+            "evt-deleted-parent",
+            EventType.FOLDER_CREATE,
+            {"node_id": "folder-deleted", "parent_node_id": None, "name": "deleted"},
+        )
+    )
+    processor.process_event(
+        _event(
+            "evt-file-add",
+            EventType.FILE_ADD,
+            {
+                "node_id": "file-1",
+                "file_id": "content-1",
+                "parent_node_id": None,
+                "name": "report.txt",
+                "blob_ids": ["blob-1.enc"],
+                "content_hash": "content-hash-1",
+                "mime_type": "text/plain",
+                "file_size_bytes": 5,
+                "encrypted_size_bytes": 11,
+                "metadata_json": None,
+            },
+        )
+    )
+    processor.process_event(
+        _event(
+            "evt-delete-parent",
+            EventType.FOLDER_DELETE,
+            {"node_id": "folder-deleted", "cascade": True},
+        )
+    )
+    processor.process_event(
+        _event(
+            "evt-file-conflict",
+            EventType.FILE_MOVE,
+            {
+                "node_id": "file-1",
+                "new_parent_node_id": "folder-deleted",
+                "new_name": "report.txt",
+            },
+        )
+    )
+
+    deleted = processor.process_event(
+        _event(
+            "evt-file-delete",
+            EventType.FILE_DELETE,
+            {"node_id": "file-1", "file_id": "content-1", "reason": "user_action"},
+        )
+    )
+
+    assert deleted.status.value == "success"
+    with session_factory() as session:
+        ref = session.scalar(
+            select(FileReference).where(FileReference.node_id == "file-1")
+        )
+        conflict = session.scalar(
+            select(SyncConflict).where(SyncConflict.node_id == "file-1")
+        )
+        assert ref is None
+        assert conflict is not None
+        assert conflict.status == "deleted"
+
+
+def test_folder_move_out_of_conflict_folder_resolves_descendant_conflicts(
+    tmp_path,
+) -> None:
+    processor, session_factory = _build_processor(tmp_path)
+    processor.process_event(
+        _event(
+            "evt-deleted-parent",
+            EventType.FOLDER_CREATE,
+            {"node_id": "folder-deleted", "parent_node_id": None, "name": "deleted"},
+        )
+    )
+    processor.process_event(
+        _event(
+            "evt-live-parent",
+            EventType.FOLDER_CREATE,
+            {"node_id": "folder-live", "parent_node_id": None, "name": "live"},
+        )
+    )
+    processor.process_event(
+        _event(
+            "evt-folder-add",
+            EventType.FOLDER_CREATE,
+            {"node_id": "folder-1", "parent_node_id": None, "name": "docs"},
+        )
+    )
+    processor.process_event(
+        _event(
+            "evt-file-add",
+            EventType.FILE_ADD,
+            {
+                "node_id": "file-1",
+                "file_id": "content-1",
+                "parent_node_id": "folder-1",
+                "name": "report.txt",
+                "blob_ids": ["blob-1.enc"],
+                "content_hash": "content-hash-1",
+                "mime_type": "text/plain",
+                "file_size_bytes": 5,
+                "encrypted_size_bytes": 11,
+                "metadata_json": None,
+            },
+        )
+    )
+    processor.process_event(
+        _event(
+            "evt-delete-parent",
+            EventType.FOLDER_DELETE,
+            {"node_id": "folder-deleted", "cascade": True},
+        )
+    )
+    processor.process_event(
+        _event(
+            "evt-folder-conflict",
+            EventType.FOLDER_MOVE,
+            {
+                "node_id": "folder-1",
+                "new_parent_node_id": "folder-deleted",
+                "new_name": "docs",
+            },
+        )
+    )
+
+    with session_factory.begin() as session:
+        child_ref = session.scalar(
+            select(FileReference).where(FileReference.node_id == "file-1")
+        )
+        assert child_ref is not None
+        upsert_sync_conflict(
+            session,
+            conflict_id="conflict-child",
+            node_id="file-1",
+            node_kind="file",
+            archived_name=child_ref.name,
+            archived_virtual_path=child_ref.virtual_path,
+            archived_file_ref_id=child_ref.id,
+            file_entry_id=child_ref.file_entry_id,
+            reason_code="deleted_parent_move",
+            reason_text="Child conflict",
+            trigger_event_id="evt-child",
+            trigger_event_hash="hash-child",
+            trigger_event_type="file_move",
+            origin_device_id="device-a",
+        )
+
+    restored = processor.process_event(
+        _event(
+            "evt-folder-restore",
+            EventType.FOLDER_MOVE,
+            {
+                "node_id": "folder-1",
+                "new_parent_node_id": "folder-live",
+                "new_name": "docs",
+            },
+        )
+    )
+
+    assert restored.status.value == "success"
+    with session_factory() as session:
+        folder_ref = session.scalar(
+            select(FileReference).where(FileReference.node_id == "folder-1")
+        )
+        child_ref = session.scalar(
+            select(FileReference).where(FileReference.node_id == "file-1")
+        )
+        conflicts = session.scalars(
+            select(SyncConflict).order_by(SyncConflict.conflict_id)
+        ).all()
+        assert folder_ref is not None
+        assert child_ref is not None
+        assert folder_ref.virtual_path == "/live/docs"
+        assert child_ref.virtual_path == "/live/docs/report.txt"
+        assert [conflict.status for conflict in conflicts] == ["resolved", "resolved"]
+
+
+def test_folder_delete_marks_subtree_conflicts_deleted(tmp_path) -> None:
+    processor, session_factory = _build_processor(tmp_path)
+    processor.process_event(
+        _event(
+            "evt-deleted-parent",
+            EventType.FOLDER_CREATE,
+            {"node_id": "folder-deleted", "parent_node_id": None, "name": "deleted"},
+        )
+    )
+    processor.process_event(
+        _event(
+            "evt-folder-add",
+            EventType.FOLDER_CREATE,
+            {"node_id": "folder-1", "parent_node_id": None, "name": "docs"},
+        )
+    )
+    processor.process_event(
+        _event(
+            "evt-file-add",
+            EventType.FILE_ADD,
+            {
+                "node_id": "file-1",
+                "file_id": "content-1",
+                "parent_node_id": "folder-1",
+                "name": "report.txt",
+                "blob_ids": ["blob-1.enc"],
+                "content_hash": "content-hash-1",
+                "mime_type": "text/plain",
+                "file_size_bytes": 5,
+                "encrypted_size_bytes": 11,
+                "metadata_json": None,
+            },
+        )
+    )
+    processor.process_event(
+        _event(
+            "evt-delete-parent",
+            EventType.FOLDER_DELETE,
+            {"node_id": "folder-deleted", "cascade": True},
+        )
+    )
+    processor.process_event(
+        _event(
+            "evt-folder-conflict",
+            EventType.FOLDER_MOVE,
+            {
+                "node_id": "folder-1",
+                "new_parent_node_id": "folder-deleted",
+                "new_name": "docs",
+            },
+        )
+    )
+
+    with session_factory.begin() as session:
+        child_ref = session.scalar(
+            select(FileReference).where(FileReference.node_id == "file-1")
+        )
+        assert child_ref is not None
+        upsert_sync_conflict(
+            session,
+            conflict_id="conflict-child",
+            node_id="file-1",
+            node_kind="file",
+            archived_name=child_ref.name,
+            archived_virtual_path=child_ref.virtual_path,
+            archived_file_ref_id=child_ref.id,
+            file_entry_id=child_ref.file_entry_id,
+            reason_code="deleted_parent_move",
+            reason_text="Child conflict",
+            trigger_event_id="evt-child",
+            trigger_event_hash="hash-child",
+            trigger_event_type="file_move",
+            origin_device_id="device-a",
+        )
+
+    deleted = processor.process_event(
+        _event(
+            "evt-folder-delete-conflict",
+            EventType.FOLDER_DELETE,
+            {"node_id": "folder-1", "cascade": True},
+        )
+    )
+
+    assert deleted.status.value == "success"
+    with session_factory() as session:
+        folder_ref = session.scalar(
+            select(FileReference).where(FileReference.node_id == "folder-1")
+        )
+        child_ref = session.scalar(
+            select(FileReference).where(FileReference.node_id == "file-1")
+        )
+        conflicts = session.scalars(
+            select(SyncConflict).order_by(SyncConflict.conflict_id)
+        ).all()
+        assert folder_ref is None
+        assert child_ref is None
+        assert [conflict.status for conflict in conflicts] == ["deleted", "deleted"]
+
+
+def test_local_file_add_replay_seeds_sync_state_when_row_already_exists(
+    tmp_path,
+) -> None:
     processor, session_factory = _build_processor(tmp_path)
     with session_factory() as session:
         file_entry = FileEntry(
@@ -394,7 +819,9 @@ def test_local_file_add_replay_seeds_sync_state_when_row_already_exists(tmp_path
         assert state.last_content_hlc_wall_time == 4000
 
 
-def test_local_folder_create_replay_seeds_sync_state_when_row_already_exists(tmp_path) -> None:
+def test_local_folder_create_replay_seeds_sync_state_when_row_already_exists(
+    tmp_path,
+) -> None:
     processor, session_factory = _build_processor(tmp_path)
     with session_factory() as session:
         session.add(
@@ -430,7 +857,9 @@ def test_local_folder_create_replay_seeds_sync_state_when_row_already_exists(tmp
         assert state.last_content_hlc_wall_time is None
 
 
-def test_local_file_delete_replay_records_tombstone_when_row_already_gone(tmp_path) -> None:
+def test_local_file_delete_replay_records_tombstone_when_row_already_gone(
+    tmp_path,
+) -> None:
     processor, session_factory = _build_processor(tmp_path)
     event = VaultEvent(
         event_id="evt-local-file-delete",
@@ -510,4 +939,3 @@ def test_folder_delete_removes_descendants_recursively(tmp_path) -> None:
         )
         assert refs == []
         assert tombstone is not None
-
