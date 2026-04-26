@@ -17,6 +17,7 @@ dependencies = [
 
 [project.scripts]
 glyphweave = "app.ui.cli.main:main"
+glyphweave-gui = "app.ui.gui.demo:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -24,6 +25,11 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
+
+[tool.uv]
+required-environments = [
+    "sys_platform == 'win32' and platform_machine == 'AMD64'",
+]
 
 [dependency-groups]
 dev = [
@@ -58,4 +64,3 @@ ignore = ["S101"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--cov=app --cov-report=term-missing"
-

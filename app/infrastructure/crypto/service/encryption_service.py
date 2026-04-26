@@ -288,6 +288,11 @@ class EncryptionService:
                 AttributeError or OSError when tell() or seek() are used.
         """
         try:
+            seekable = getattr(handle, "seekable", None)
+            if callable(seekable) and not seekable():
+                raise ValueError(
+                    "encrypt_file requires a seekable binary input stream"
+                )
             current = handle.tell()
             handle.seek(0, 2)
             size = handle.tell()

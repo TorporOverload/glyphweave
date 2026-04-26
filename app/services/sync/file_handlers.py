@@ -370,6 +370,9 @@ def _ensure_blob_references(
         if existing_blob_id == blob_id:
             continue
         if existing_blob_id is not None:
+            # A file entry already has a blob reference at this index.
+            # Only the first blob set is retained; alternate sets are
+            # skipped to prevent duplicate blob references per file entry.
             logger.warning(
                 "Skipping alternate blob set for deduplicated file entry "
                 "%s at chunk %s",

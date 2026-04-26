@@ -14,8 +14,9 @@ class MetaStore:
         self._files: Dict[str, FileMeta] = {}
         self._directories: Dict[str, set] = {"/": set()}
 
-    def normalize_path(self, path: str) -> str:
-        """Ensure path starts with a slash and has no trailing slash (except for
+    @staticmethod
+    def normalize_path(path: str) -> str:
+        """Ensure a path starts with a slash and has no trailing slash (except for
         root)."""
         if not path.startswith("/"):
             path = "/" + path
@@ -35,17 +36,17 @@ class MetaStore:
         return parent, name
 
     def path_exists(self, path: str) -> bool:
-        """Return True if path refers to either a known file or a known directory."""
+        """Return True if a path refers to either a known file or a known directory."""
         path = self.normalize_path(path)
         return path in self._path_to_id or path in self._directories
 
     def is_directory(self, path: str) -> bool:
-        """Return True if path is a registered directory."""
+        """Return True if a path is a registered directory."""
         path = self.normalize_path(path)
         return path in self._directories
 
     def is_file(self, path: str) -> bool:
-        """Return True if path is a registered file."""
+        """Return True if a path is a registered file."""
         path = self.normalize_path(path)
         return path in self._path_to_id
 
@@ -55,7 +56,7 @@ class MetaStore:
         original_name: Optional[str] = None,
         mode: int = stat.S_IFREG | 0o644,
     ) -> FileMeta:
-        """Create a new file entry at path and return its FileMeta."""
+        """Create a new file entry at a path and return its FileMeta."""
         path = self.normalize_path(path)
         parent, name = self.get_parent_and_name(path)
         if not self.is_directory(parent):
@@ -76,7 +77,7 @@ class MetaStore:
         return metadata
 
     def create_directory(self, path: str, mode: int = stat.S_IFDIR | 0o755) -> None:
-        """Register a new directory at path, raising errors for missing parent or
+        """Register a new directory at a path, raising errors for missing parent or
         duplicate."""
         path = self.normalize_path(path)
         parent, name = self.get_parent_and_name(path)

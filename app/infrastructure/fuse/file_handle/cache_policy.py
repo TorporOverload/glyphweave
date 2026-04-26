@@ -17,12 +17,11 @@ def enforce_global_cache_limit(manager) -> None:
         )
         target_free = current_total - manager.max_total_cache_bytes
 
-    freed = 0
-
-    for handle in sorted_handles:
-        if freed >= target_free:
-            break
-        freed += handle.evict_chunks(target_free - freed)
+        freed = 0
+        for handle in sorted_handles:
+            if freed >= target_free:
+                break
+            freed += handle.evict_chunks(target_free - freed)
 
     logger.debug(f"Evicted {freed} bytes from cache")
 

@@ -17,6 +17,11 @@ class FileMetadataResult:
 
 class FileMetadataService:
     @staticmethod
+    def _created_timestamp(stat_result: Any) -> float:
+        """Prefer filesystem birth time when available, with a portable fallback."""
+        return float(getattr(stat_result, "st_birthtime", stat_result.st_ctime))
+
+    @staticmethod
     def extract(file_path: Path) -> FileMetadataResult:
         path = Path(file_path)
         if not path.exists():
@@ -32,7 +37,7 @@ class FileMetadataService:
             "mime_type": mime_type or "application/octet-stream",
             "size_bytes": stat_result.st_size,
             "created_at": datetime.fromtimestamp(
-                stat_result.st_ctime, tz=timezone.utc
+                FileMetadataService._created_timestamp(stat_result), tz=timezone.utc
             ).isoformat(),
             "modified_at": datetime.fromtimestamp(
                 stat_result.st_mtime, tz=timezone.utc

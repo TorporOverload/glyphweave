@@ -80,10 +80,12 @@ class IndexingService:
             logger.exception(f"Indexing failed for {filename}: {exc}")
             try:
                 self._set_status(entry.id, ExtractionStatus.FAILED, preview="")
-            except Exception:
+            except Exception as exc:
                 logger.warning(
                     "Failed to update extraction status after indexing error: "
-                    + str(entry.id)
+                    + str(entry.id) +
+                    "Exception: " +
+                    str(exc)
                 )
             return False
         finally:
@@ -123,10 +125,12 @@ class IndexingService:
             logger.exception(f"Indexing failed for {filename} from source file: {exc}")
             try:
                 self._set_status(file_entry_id, ExtractionStatus.FAILED, preview="")
-            except Exception:
+            except Exception as exc:
                 logger.warning(
                     "Failed to update extraction status after indexing error: "
                     f"{file_entry_id}"
+                    "Exception: "
+                    f"{exc}"
                 )
             return False
 
@@ -173,7 +177,7 @@ class IndexingService:
             )
             return True
 
-        logger.info(
+        logger.debug(
             f"Indexing writing FTS content: entry_id={file_entry_id}, "
             f"filename={filename}, chars={len(result.content)}"
         )

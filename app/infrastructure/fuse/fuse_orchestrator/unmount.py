@@ -201,3 +201,34 @@ def cleanup_all(
         get_runtime_module().shutil.rmtree(mount_base, ignore_errors=True)
     mount_base.mkdir(parents=True, exist_ok=True)
     return count
+
+
+def cleanup_stale_mounts(mount_base: Path) -> int:
+    """Best-effort cleanup for mount directories left behind by a crashed app."""
+    if not mount_base.exists():
+        return 0
+
+    cleaned = 0
+    rt = get_runtime_module()
+    for entry in list(mount_base.iterdir()):
+        if entry.is_dir():
+            info = MountInfo(
+                file_ref_id=-1,
+                file_name=entry.name,
+                mount_dir=entry,
+                file_path=entry,
+                fs=None,
+            )
+            if unmount_info(-1, info):
+                cleaned += 1
+            continue
+
+        try:
+            entry.unlink()
+            cleaned += 1
+        except Exception as exc:
+            rt.logger.warning(
+                "Failed to remove stale mount artifact %s: %s", entry, exc)
+
+    mount_base.mkdir(parents=True, exist_ok=True)
+    return cleaned

@@ -8,7 +8,7 @@ run:
 run-gui:
     $env:GLYPHWEAVE_DEBUG = "3"; \
     $env:GLYPHWEAVE_EVENT_ENCRYPTION = "0"; \
-    uv run -m app.ui.gui.demo
+    uv run glyphweave-gui
 
 test target='' output='0':
     $env:GLYPHWEAVE_DEBUG = "3"; \

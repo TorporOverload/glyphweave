@@ -9,7 +9,7 @@ FUSE process group.
 - Keys are converted from hex strings into a mutable bytearray immediately and
   then consumed into SecureMemory as soon as possible.
 - Intermediate hex string is deleted
-- The paging window (JSON payload â†’ hex string â†’ mutable bytes â†’ SecureMemory) is
+- The paging window (JSON payload -> hex string -> mutable bytes -> SecureMemory) is
   minimized by reordering operations: key_service (with SecureMemory) is
   initialized before DbBase, ensuring VirtualLock is active before DB ops.
 """
@@ -80,7 +80,7 @@ def _read_key_material(pipe_handle: int) -> tuple[bytearray, str]:
     master_key_bytes = bytearray.fromhex(master_key_hex)
 
     # Zero the temporary hex string in memory (best-effort, may not survive GC)
-    # This is defence-in-depth; SecureMemory wrapping is the primary defence
+    # This is defense-in-depth; SecureMemory wrapping is the primary defense
     del master_key_hex
 
     return master_key_bytes, db_key_hex
@@ -100,13 +100,15 @@ def main() -> int:
         Path(args.vaults_data_dir) if args.vaults_data_dir else get_vaults_data_dir()
     )
     cache_dir = runtime_cache_dir(vaults_data_dir / args.vault_id)
-    master_key_bytes, db_key_hex = _read_key_material(args.key_pipe_handle)
 
-    # Wrap master key in SecureMemory immediately before any other processing.
+    # Wrap the master key in SecureMemory immediately before any other processing.
     # On Windows this copies the bytes into a dedicated VirtualAlloc region,
     # zeroes the temporary mutable source buffer, and locks the page-backed region.
     key_service = KeyService()
     key_service.vault_key_file = load_vault_key(vault_key_path(vault_path))
+
+    # Read master key bytes from the inherited pipe just before wrapping them.
+    master_key_bytes, db_key_hex = _read_key_material(args.key_pipe_handle)
     key_service.master_key = SecureMemory.consume_mutable(master_key_bytes)
     event_store = EventStore(
         EventStoreConfig(
@@ -117,7 +119,7 @@ def main() -> int:
         )
     )
 
-    # Now safe to proceed with DB operations; master key is locked in memory
+    # Now safe to proceed with DB operations; the master key is locked in memory
     db = DbBase(args.vault_id, db_key_hex, vaults_data_dir=vaults_data_dir)
     session_factory = db.SessionLocal
     install_db_dump_hook(

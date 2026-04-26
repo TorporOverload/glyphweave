@@ -68,15 +68,26 @@ def cleanup(service: "VaultFileService", *, flush_db_dump: bool = True) -> None:
     if runtime is not None:
         runtime.stop()
         service.context.event_replay_runtime = None
-    event_emitter = service._build_event_emitter()
-    cleanup_unlocked_files(
-        service.context,
-        fallback_opens=service.fallback_opens,
-        file_service=service._require_file_service(),
-        folder_service=service._require_folder_service(),
-        encryption_service=service._require_encryption_service(),
-        event_emitter=event_emitter,
-    )
+    if (
+        service.context.file_service is not None
+        and service.context.folder_service is not None
+        and service.context.encryption_service is not None
+    ):
+        event_emitter = service._build_event_emitter()
+        cleanup_unlocked_files(
+            service.context,
+            fallback_opens=service.fallback_opens,
+            file_service=service._require_file_service(),
+            folder_service=service._require_folder_service(),
+            encryption_service=service._require_encryption_service(),
+            event_emitter=event_emitter,
+        )
+    else:
+        mounts = service.context.mounts
+        if mounts:
+            mounts.cleanup_all()
+        if service.context.db and service.context.db.engine:
+            service.context.db.engine.dispose()
     session_factory = service.context.session_factory
     if flush_db_dump and session_factory is not None:
         flush_db_dump_hook(session_factory)

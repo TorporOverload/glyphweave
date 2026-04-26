@@ -4,11 +4,21 @@ from app.infrastructure.persistence.db.model.WAL_entry import WalEntry
 from app.infrastructure.fuse.chunk_store import ChunkStore
 
 from .runtime import get_runtime_module
+from . import unmount
 
 
 def check_and_recover(orchestrator) -> None:
     """Clean orphaned blobs and replay any unflushed WAL entries from a previous run."""
     rt = get_runtime_module()
+
+    try:
+        cleaned_mounts = unmount.cleanup_stale_mounts(orchestrator.mount_base)
+        if cleaned_mounts > 0:
+            rt.logger.info(
+                "Recovery: cleaned up %s stale mount directory(s)", cleaned_mounts
+            )
+    except Exception as e:
+        rt.logger.warning(f"Recovery: error cleaning stale mounts: {e}")
 
     try:
         cleaned = orchestrator.wal_service.cleanup_orphaned_blobs()

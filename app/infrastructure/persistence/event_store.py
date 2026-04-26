@@ -39,11 +39,11 @@ class EventIntegrityError(ValueError):
 class EventStore:
     """Append-only Merkle-style event store rooted inside a vault."""
 
-    def __init__(self, config: EventStoreConfig | Path) -> None:
-        self._config = config if isinstance(config, EventStoreConfig) else None
-        self._vault_path = Path(
-            config.vault_path if isinstance(config, EventStoreConfig) else config
-        )
+    def __init__(self, config: EventStoreConfig) -> None:
+        if not isinstance(config, EventStoreConfig):
+            raise TypeError("EventStore requires an EventStoreConfig")
+        self._config = config
+        self._vault_path = Path(config.vault_path)
 
     @property
     def events_dir(self) -> Path:
@@ -236,7 +236,7 @@ class EventStore:
         }
 
     def _serialize_frontier_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
-        if self._config is None or not self._config.encryption_enabled:
+        if not self._config.encryption_enabled:
             return payload
 
         device_id = str(payload["device_id"])
@@ -267,10 +267,6 @@ class EventStore:
             payload.get("kind") == FRONTIER_RECORD_KIND
             and payload.get("mode") == "encrypted"
         ):
-            if self._config is None:
-                raise EventIntegrityError(
-                    "Encrypted frontier record requires an initialized EventStoreConfig"
-                )
             envelope_device_id = str(payload.get("device_id") or device_id)
             record_key = f"frontier:{envelope_device_id}"
             plaintext = decrypt_event_bytes(
@@ -298,8 +294,6 @@ class EventStore:
     def _serialize_event_payload(
         self, event: VaultEvent, event_hash: str
     ) -> dict[str, Any]:
-        if self._config is None:
-            return event.to_dict()
         if self._config.encryption_enabled:
             return encrypt_event(
                 event=event, event_hash=event_hash, config=self._config
@@ -312,10 +306,6 @@ class EventStore:
         event_hash: str,
     ) -> VaultEvent:
         if is_encrypted_envelope(payload):
-            if self._config is None:
-                raise EventIntegrityError(
-                    "Encrypted event object requires an initialized EventStoreConfig"
-                )
             event = decrypt_event(envelope=payload, config=self._config)
         elif is_plaintext_envelope(payload):
             event = VaultEvent.from_dict(dict(payload.get("event", {})))

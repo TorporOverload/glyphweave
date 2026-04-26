@@ -9,9 +9,9 @@ from app.common.logging import logger
 _PLATFORM = platform.system()
 _kernel32 = None
 _WIN_MEM_COMMIT = 0x1000  # reserve and commit pages
-_WIN_MEM_RESERVE = 0x2000  # reserve address pafe only
+_WIN_MEM_RESERVE = 0x2000  # reserve address page only
 _WIN_MEM_RELEASE = 0x8000  # free the allocation
-_WIN_PAGE_READWRITE = 0x04  # read and write only no excecution allowed
+_WIN_PAGE_READWRITE = 0x04  # read and write-only no execution allowed
 
 
 class _SYSTEM_INFO(ctypes.Structure):
@@ -96,6 +96,8 @@ class SecureMemory:
         """Build secure storage from a mutable buffer and zero the source."""
         try:
             return cls(data)
+        except Exception:
+            raise
         finally:
             cls.secure_zero(data)
 
@@ -110,7 +112,8 @@ class SecureMemory:
         self._buffer = buffer_type.from_address(self._address)
         self._view = self._make_readonly_view(self._buffer)
 
-    def _get_windows_page_size(self) -> int:
+    @staticmethod
+    def _get_windows_page_size() -> int:
         """Retrieve the system memory page size via GetSystemInfo."""
         if not _kernel32:
             raise SecureMemoryError("Windows secure memory APIs are unavailable")
@@ -121,7 +124,8 @@ class SecureMemory:
             raise SecureMemoryError("GetSystemInfo returned an invalid page size")
         return int(system_info.dwPageSize)
 
-    def _virtual_alloc(self, size: int) -> int:
+    @staticmethod
+    def _virtual_alloc(size: int) -> int:
         """Allocate a committed, read-write virtual memory region of the given size."""
         if not _kernel32:
             raise SecureMemoryError("Windows secure memory APIs are unavailable")
