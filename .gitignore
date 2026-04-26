@@ -57,7 +57,7 @@ Thumbs.db
 
 # Test files
 
-.test_tmp/
+.worktrees/
 test_data/
 
 .ruff_cache/
@@ -68,3 +68,5 @@ test_data/
 
 qttest.py
 nul
+
+.zread/
