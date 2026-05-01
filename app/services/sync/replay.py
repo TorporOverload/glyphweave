@@ -3,7 +3,14 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol, cast
+
+if TYPE_CHECKING:
+    from app.services.sync.event_emitter import (
+        FileEntryLike,
+        FileRefLike,
+        FolderRefLike,
+    )
 
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
@@ -314,8 +321,8 @@ def _emit_conflict_resolution_events(
         if kind == "file_conflict_archive":
             assert file_ref_payload.file_entry is not None
             emitter.emit_file_conflict_archive(
-                file_ref_payload,
-                file_ref_payload.file_entry,
+                cast("FileRefLike", file_ref_payload),
+                cast("FileEntryLike", file_ref_payload.file_entry),
                 conflict_archived_name,
                 conflict_id=conflict_conflict_id,
                 reason_code=conflict_reason_code,
@@ -327,7 +334,7 @@ def _emit_conflict_resolution_events(
             )
         else:
             emitter.emit_folder_conflict_archive(
-                file_ref_payload,
+                cast("FolderRefLike", file_ref_payload),
                 conflict_archived_name,
                 conflict_id=conflict_conflict_id,
                 reason_code=conflict_reason_code,
@@ -475,11 +482,11 @@ def is_event_ready_for_replay(vault_path: Path, discovered: DiscoveredEvent) -> 
         payload = FileAddData.from_dict(event.payload)
         return _all_blobs_exist(vault_path, payload.blob_ids)
     if event.type == EventType.FILE_CONFLICT_ARCHIVE:
-        payload = FileConflictArchiveData.from_dict(event.payload)
-        return _all_blobs_exist(vault_path, payload.blob_ids)
+        conflict_payload = FileConflictArchiveData.from_dict(event.payload)
+        return _all_blobs_exist(vault_path, conflict_payload.blob_ids)
     if event.type == EventType.FILE_UPDATE:
-        payload = FileUpdateData.from_dict(event.payload)
-        return _all_blobs_exist(vault_path, payload.new_blob_ids)
+        update_payload = FileUpdateData.from_dict(event.payload)
+        return _all_blobs_exist(vault_path, update_payload.new_blob_ids)
     return True
 
 

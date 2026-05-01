@@ -468,7 +468,8 @@ def _maybe_sync_local_frontier_alias_from_global(
 
     event_store.write_frontier_alias(
         device_id,
-        new_global_alias or default_frontier_alias(cli.service.context.app_data_dir, device_id),
+        new_global_alias
+        or default_frontier_alias(cli.service.context.app_data_dir, device_id),
     )
 
 

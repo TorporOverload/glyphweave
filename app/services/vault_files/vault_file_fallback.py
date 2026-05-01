@@ -4,7 +4,7 @@ from __future__ import annotations
 import mimetypes
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from app.infrastructure.crypto.service.utils import compute_hash
 from app.common.paths.runtime_layout import decrypted_files_dir, runtime_cache_dir
@@ -23,7 +23,11 @@ if TYPE_CHECKING:
     from app.infrastructure.crypto.service.encryption_service import EncryptionService
     from app.infrastructure.persistence.db.service.file_service import FileService
     from app.infrastructure.persistence.db.service.folder_service import FolderService
-    from app.services.sync.event_emitter import EventEmitter
+    from app.services.sync.event_emitter import (
+        EventEmitter,
+        FileEntryLike,
+        FileRefLike,
+    )
 
 
 def get_cached_fallback_result(
@@ -220,7 +224,11 @@ def re_encrypt_file(
             updated_ref = file_service.get_file_reference_with_blobs(file_ref.id)
             new_entry = file_service.get_file_entry_by_file_id(existing_entry.file_id)
             if updated_ref is not None and new_entry is not None:
-                event_emitter.emit_file_update(updated_ref, old_entry, new_entry)
+                event_emitter.emit_file_update(
+                    cast("FileRefLike", updated_ref),
+                    cast("FileEntryLike", old_entry),
+                    cast("FileEntryLike", new_entry),
+                )
         return
 
     new_file_id = str(uuid.uuid4())
@@ -259,9 +267,9 @@ def re_encrypt_file(
             hydrated_new_entry = file_service.get_file_entry_by_file_id(new_file_id)
             if updated_ref is not None and hydrated_new_entry is not None:
                 event_emitter.emit_file_update(
-                    updated_ref,
-                    old_entry,
-                    hydrated_new_entry,
+                    cast("FileRefLike", updated_ref),
+                    cast("FileEntryLike", old_entry),
+                    cast("FileEntryLike", hydrated_new_entry),
                 )
     except Exception:
         if blob_ids and not new_entry_created:

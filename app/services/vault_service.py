@@ -129,9 +129,15 @@ class VaultService:
         """Search vault files by indexed content."""
         return self.files.search(query, limit)
 
-    def search_page(self, query: str, limit: int = 20, offset: int = 0):
-        """Return one page of vault search results."""
-        return self.files.search_page(query, limit, offset)
+    def search_page(
+        self, query: str, limit: int = 20, offset: int = 0, scope: str = "all"
+    ):
+        """Return one page of vault search results.
+
+        ``scope`` is one of ``"all"`` / ``"filename"`` / ``"content"``;
+        defaults to ``"all"``.
+        """
+        return self.files.search_page(query, limit, offset, scope=scope)
 
     def reindex_pending(self, limit: int = 500):
         """Retry indexing for supported pending or failed files."""

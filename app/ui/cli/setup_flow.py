@@ -92,7 +92,10 @@ def delete_local_vault_record_interactive(cli: Any, known_vaults: list[dict]) ->
 
     removed = cli.service.delete_local_vault_record(str(selected["vault_id"]))
     if removed:
-        print(f"Removed local record for {selected.get('vault_alias') or selected['vault_id']}.")
+        print(
+            f"Removed local record for "
+            f"{selected.get('vault_alias') or selected['vault_id']}."
+        )
     else:
         print("Vault was not present in the local registry.")
 

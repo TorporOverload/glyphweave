@@ -44,6 +44,7 @@ def open_in_default_app(orchestrator, file_path) -> None:
                     cmd,
                     stdout=rt.subprocess.DEVNULL,
                     stderr=rt.subprocess.DEVNULL,
+                    creationflags=rt.subprocess.CREATE_NO_WINDOW,
                 )
                 rt.logger.debug(f"Opened via launcher command: {cmd!r}")
                 return
@@ -162,7 +163,7 @@ def mount_and_open(
         fuse_process = rt.subprocess.Popen(
             cmd,
             env=env,
-            creationflags=rt.subprocess.CREATE_NEW_PROCESS_GROUP,
+            creationflags=rt.subprocess.CREATE_NEW_PROCESS_GROUP | rt.subprocess.CREATE_NO_WINDOW,
             stdout=rt.subprocess.DEVNULL,
             stderr=rt.subprocess.DEVNULL,
             startupinfo=startupinfo,

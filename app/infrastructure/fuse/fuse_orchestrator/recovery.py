@@ -36,7 +36,7 @@ def check_and_recover(orchestrator) -> None:
             f"Recovery: replaying WAL entries for {len(pending_by_file)} file(s)"
         )
 
-        all_entry_ids = []
+        all_entry_ids: list[int] = []
         for file_ref_id, entries in pending_by_file.items():
             try:
                 replay_entries_for_file(orchestrator, file_ref_id, entries)

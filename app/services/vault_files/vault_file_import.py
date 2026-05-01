@@ -3,7 +3,7 @@ from __future__ import annotations
 import mimetypes
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from sqlalchemy.exc import IntegrityError
 
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from app.infrastructure.crypto.service.encryption_service import EncryptionService
     from app.infrastructure.persistence.db.service.file_service import FileService
     from app.infrastructure.persistence.db.service.folder_service import FolderService
-    from app.services.sync.event_emitter import EventEmitter
+    from app.services.sync.event_emitter import EventEmitter, FileRefLike, FolderRefLike
 
 
 def add_file(
@@ -64,7 +64,7 @@ def add_file(
             file_entry_id=existing_entry.id,
         )
         if event_emitter is not None:
-            event_emitter.emit_file_add(created_ref)
+            event_emitter.emit_file_add(cast("FileRefLike", created_ref))
         return AddFileResult(
             file_name=destination_name,
             deduplicated=True,
@@ -124,7 +124,7 @@ def add_file(
                 file_entry_id=existing_entry.id,
             )
             if event_emitter is not None:
-                event_emitter.emit_file_add(created_ref)
+                event_emitter.emit_file_add(cast("FileRefLike", created_ref))
             return AddFileResult(
                 file_name=destination_name,
                 deduplicated=True,
@@ -148,7 +148,7 @@ def add_file(
             file_entry_id=file_entry.id,
         )
         if event_emitter is not None:
-            event_emitter.emit_file_add(created_ref)
+            event_emitter.emit_file_add(cast("FileRefLike", created_ref))
 
         indexed = False
         if indexing_service is not None:
@@ -217,7 +217,7 @@ def _resolve_or_create_parent_folder(
         if existing is None:
             existing = folder_service.create_folder(name=segment, parent_id=parent_id)
             if event_emitter is not None:
-                event_emitter.emit_folder_create(existing)
+                event_emitter.emit_folder_create(cast("FolderRefLike", existing))
         elif not existing.is_folder:
             bad_path = "/" + "/".join(traversed)
             raise NotADirectoryError(

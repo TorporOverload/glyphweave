@@ -22,20 +22,20 @@ if TYPE_CHECKING:
     from app.services.vault_files.vault_file_service import VaultFileService
 
 
-def list_root_entries(service: "VaultFileService"):
+def list_root_entries(service: VaultFileService):
     return service._require_folder_service().get_root_entries()
 
 
-def list_children(service: "VaultFileService", parent_id: int):
+def list_children(service: VaultFileService, parent_id: int):
     return service._require_folder_service().get_children(parent_id)
 
 
-def list_all_entries(service: "VaultFileService"):
+def list_all_entries(service: VaultFileService):
     return service._require_folder_service().get_vault_tree()
 
 
 def get_file_reference_metadata(
-    service: "VaultFileService", file_ref_id: int
+    service: VaultFileService, file_ref_id: int
 ) -> dict:
     file_ref = service._require_file_service().get_file_reference_with_blobs(
         file_ref_id
@@ -54,17 +54,28 @@ def get_file_reference_metadata(
 
 
 def search(
-    service: "VaultFileService", query: str, limit: int = 20
+    service: VaultFileService, query: str, limit: int = 20
 ) -> list[SearchResult]:
     return search_page(service, query, limit=limit, offset=0).results
 
 
 def search_page(
-    service: "VaultFileService",
+    service: VaultFileService,
     query: str,
     limit: int = 20,
     offset: int = 0,
+    scope: str = "all",
 ) -> SearchPage:
+    """Return one page of search results.
+
+    ``scope`` selects which index branches are queried:
+      * ``"all"``      — filename and content.
+      * ``"filename"`` — filename matches only.
+      * ``"content"``  — full-text content matches only.
+    """
+    if scope not in ("all", "filename", "content"):
+        raise ValueError(f"Unknown search scope: {scope!r}")
+
     normalized = query.strip()
     if not normalized:
         return SearchPage(results=[], has_more=False)
@@ -80,44 +91,48 @@ def search_page(
         results: list[SearchResult] = []
         seen_ref_ids: set[int] = set()
 
-        for ref_id, file_name, virtual_path, rank in search_file_references(
-            session, normalized, fetch_limit
-        ):
-            results.append(
-                SearchResult(
-                    file_ref_id=ref_id,
-                    file_name=file_name,
-                    virtual_path=virtual_path,
-                    snippet=service._format_filename_snippet(file_name, normalized),
-                    rank=rank,
-                )
-            )
-            seen_ref_ids.add(ref_id)
-
-        for file_entry_id, snippet, rank in search_content(
-            session, normalized, fetch_limit
-        ):
-            refs = session.scalars(
-                select(FileReference)
-                .where(
-                    FileReference.file_entry_id == int(file_entry_id),
-                    FileReference.is_folder.is_(False),
-                )
-                .order_by(FileReference.id)
-            ).all()
-            for ref in refs:
-                if ref.id in seen_ref_ids:
-                    continue
+        if scope in ("all", "filename"):
+            for ref_id, file_name, virtual_path, rank in search_file_references(
+                session, normalized, fetch_limit
+            ):
                 results.append(
                     SearchResult(
-                        file_ref_id=ref.id,
-                        file_name=ref.name,
-                        virtual_path=ref.virtual_path,
-                        snippet=snippet,
+                        file_ref_id=ref_id,
+                        file_name=file_name,
+                        virtual_path=virtual_path,
+                        snippet=service._format_filename_snippet(
+                            file_name, normalized
+                        ),
                         rank=rank,
                     )
                 )
-                seen_ref_ids.add(ref.id)
+                seen_ref_ids.add(ref_id)
+
+        if scope in ("all", "content"):
+            for file_entry_id, snippet, rank in search_content(
+                session, normalized, fetch_limit
+            ):
+                refs = session.scalars(
+                    select(FileReference)
+                    .where(
+                        FileReference.file_entry_id == int(file_entry_id),
+                        FileReference.is_folder.is_(False),
+                    )
+                    .order_by(FileReference.id)
+                ).all()
+                for ref in refs:
+                    if ref.id in seen_ref_ids:
+                        continue
+                    results.append(
+                        SearchResult(
+                            file_ref_id=ref.id,
+                            file_name=ref.name,
+                            virtual_path=ref.virtual_path,
+                            snippet=snippet,
+                            rank=rank,
+                        )
+                    )
+                    seen_ref_ids.add(ref.id)
 
         page_results = results[offset : offset + limit]
         return SearchPage(
@@ -127,7 +142,7 @@ def search_page(
 
 
 def reindex_pending(
-    service: "VaultFileService", limit: int = 500
+    service: VaultFileService, limit: int = 500
 ) -> tuple[int, int]:
     if service.context.session_factory is None:
         raise RuntimeError("Session factory is not initialized")
@@ -154,7 +169,7 @@ def reindex_pending(
     return success, failed
 
 
-def get_db_debug_info(service: "VaultFileService") -> dict:
+def get_db_debug_info(service: VaultFileService) -> dict:
     local_data_path = service.context.local_data_path
     if local_data_path is None:
         raise RuntimeError("Local data path is not set")
@@ -165,14 +180,14 @@ def get_db_debug_info(service: "VaultFileService") -> dict:
     }
 
 
-def get_recovery_phrase(service: "VaultFileService") -> str:
+def get_recovery_phrase(service: VaultFileService) -> str:
     key_service = service.context.key_service
     if not key_service or not key_service.master_key:
         raise RuntimeError("Vault is not unlocked")
     return key_service.unwrap_recovery_phrase_with_master()
 
 
-def list_sync_conflicts(service: "VaultFileService") -> list[SyncConflictInfo]:
+def list_sync_conflicts(service: VaultFileService) -> list[SyncConflictInfo]:
     session_factory = service.context.session_factory
     if session_factory is None:
         raise RuntimeError("Session factory is not initialized")
@@ -183,7 +198,7 @@ def list_sync_conflicts(service: "VaultFileService") -> list[SyncConflictInfo]:
 
 
 def get_sync_conflict(
-    service: "VaultFileService", conflict_id: str
+    service: VaultFileService, conflict_id: str
 ) -> SyncConflictInfo | None:
     session_factory = service.context.session_factory
     if session_factory is None:

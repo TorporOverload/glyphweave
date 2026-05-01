@@ -37,7 +37,7 @@ def _run_kreuzberg_extraction(file_path: Path) -> tuple[str, dict[str, Any]]:
 
     result = extract_file_sync(str(file_path), config=ExtractionConfig())
     content = result.content or ""
-    metadata = result.metadata or {}
+    metadata = dict(result.metadata) if result.metadata else {}
     return content, metadata
 
 

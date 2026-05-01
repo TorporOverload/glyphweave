@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select
 
@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
     from app.services.models import AddFileResult
+    from app.services.sync.event_emitter import FileRefLike, FolderRefLike
     from app.services.vault_files.vault_file_service import VaultFileService
 
 
@@ -71,7 +72,7 @@ def create_folder(
     )
     event_emitter = service._build_event_emitter()
     if event_emitter is not None:
-        event_emitter.emit_folder_create(created_folder)
+        event_emitter.emit_folder_create(cast("FolderRefLike", created_folder))
     return created_folder
 
 
@@ -326,7 +327,7 @@ def _copy_reference(
         )
         event_emitter = service._build_event_emitter()
         if event_emitter is not None:
-            event_emitter.emit_folder_create(created_folder)
+            event_emitter.emit_folder_create(cast("FolderRefLike", created_folder))
         for child in service._require_folder_service().get_children(source.id):
             _copy_reference(service, child.id, created_folder.id)
         return created_folder
@@ -340,7 +341,7 @@ def _copy_reference(
     )
     event_emitter = service._build_event_emitter()
     if event_emitter is not None:
-        event_emitter.emit_file_add(created_ref)
+        event_emitter.emit_file_add(cast("FileRefLike", created_ref))
     return created_ref
 
 

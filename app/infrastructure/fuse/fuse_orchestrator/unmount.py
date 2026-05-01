@@ -92,6 +92,7 @@ def unmount_info(file_ref_id: int, info: MountInfo) -> bool:
             check=False,
             capture_output=True,
             timeout=10,
+            creationflags=rt.subprocess.CREATE_NO_WINDOW,
         )
 
     if info.process is None:

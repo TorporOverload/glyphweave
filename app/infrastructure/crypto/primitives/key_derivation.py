@@ -2,7 +2,6 @@
 
 import secrets
 
-from cryptography.exceptions import AlreadyFinalized
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf import argon2, hkdf
 

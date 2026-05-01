@@ -481,22 +481,22 @@ class VaultIntegrityService:
                 f"{payload.name} ({event.event_hash or event.event_id})",
             )
         if event.type == EventType.FILE_UPDATE:
-            payload = FileUpdateData.from_dict(event.payload)
+            update_payload = FileUpdateData.from_dict(event.payload)
             return (
-                payload.new_file_id,
-                payload.new_blob_ids,
-                payload.new_content_hash,
-                f"update:{payload.node_id} ({event.event_hash or event.event_id})",
+                update_payload.new_file_id,
+                update_payload.new_blob_ids,
+                update_payload.new_content_hash,
+                f"update:{update_payload.node_id} "
+                f"({event.event_hash or event.event_id})",
             )
         if event.type == EventType.FILE_CONFLICT_ARCHIVE:
-            payload = FileConflictArchiveData.from_dict(event.payload)
+            conflict_payload = FileConflictArchiveData.from_dict(event.payload)
             return (
-                payload.file_id,
-                payload.blob_ids,
-                payload.content_hash,
-                f"conflict:{payload.archived_name} ({
-                    event.event_hash or event.event_id
-                })",
+                conflict_payload.file_id,
+                conflict_payload.blob_ids,
+                conflict_payload.content_hash,
+                f"conflict:{conflict_payload.archived_name} "
+                f"({event.event_hash or event.event_id})",
             )
         return None
 

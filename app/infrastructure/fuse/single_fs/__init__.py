@@ -71,9 +71,9 @@ class SingleFileFS(Operations):
         self._open_count = 0
 
         self._temp_lock = threading.Lock()
-        self._temp_files = {}
-        self._temp_meta = {}
-        self._temp_file_handles = {}
+        self._temp_files: dict[int, object] = {}
+        self._temp_meta: dict[int, object] = {}
+        self._temp_file_handles: dict[int, object] = {}
         self._temp_fh_counter = 10_000
 
         self.metadata = FileMeta(

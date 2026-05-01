@@ -253,7 +253,7 @@ class SecureMemory:
         """Return self for use as a context manager."""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, *_args) -> bool:
         """Clear secure memory on context manager exit."""
         self.clear()
         return False

@@ -12,12 +12,12 @@ dependencies = [
     "sqlalchemy>=2.0.46",
     "sqlcipher3-wheels>=0.5.7",
     "watchdog>=6.0.0",
-    "PySide6>=6.10.2",
+    "PySide6>=6.10.2"
 ]
 
 [project.scripts]
 glyphweave = "app.ui.cli.main:main"
-glyphweave-gui = "app.ui.gui.demo:main"
+glyphweave-gui = "app.ui.gui.glyphweave_ui:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -34,9 +34,12 @@ required-environments = [
 [dependency-groups]
 dev = [
     "bandit>=1.9.3",
+    "lizard>=1.22.1",
+    "mypy>=1.20.2",
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",
     "ruff>=0.9.9",
+    "vulture>=2.16",
 ]
 
 [tool.coverage.run]
@@ -64,3 +67,29 @@ ignore = ["S101"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--cov=app --cov-report=term-missing"
+
+[tool.mypy]
+python_version = "3.13"
+ignore_missing_imports = true
+show_error_codes = true
+ignore_errors = false
+
+[[tool.mypy.overrides]]
+module = "app.ui.gui.*"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "app.infrastructure.crypto.primitives.secure_memory"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "app.infrastructure.fuse.chunk_store.types"
+follow_imports = "skip"
+
+[[tool.mypy.overrides]]
+module = "app.infrastructure.fuse.meta_store"
+follow_imports = "skip"
+
+[[tool.mypy.overrides]]
+module = "app.infrastructure.crypto.service.key_service"
+follow_imports = "skip"

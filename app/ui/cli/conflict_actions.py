@@ -27,7 +27,9 @@ def manage_sync_conflicts(cli: Any) -> None:
         print(f"     Path   : {conflict.archived_virtual_path}")
         print(f"     Reason : {conflict.reason_text}")
         print(f"     Event  : {conflict.trigger_event_type}")
-        print(f"     Device : {_format_device_label(app_data_dir, event_store, conflict)}")
+        print(
+            f"     Device : {_format_device_label(app_data_dir, event_store, conflict)}"
+        )
         print(f"     Created: {_format_created_at(conflict.created_at)}")
         print(f"     Status : {conflict.status}")
         print(f"     ID     : {conflict.conflict_id}")
@@ -143,10 +145,14 @@ def _app_data_dir(cli: Any):
     return cli.service.context.app_data_dir
 
 
-def _resolve_device_label_alias(app_data_dir, event_store, device_id: str) -> str | None:
+def _resolve_device_label_alias(
+    app_data_dir, event_store, device_id: str
+) -> str | None:
     if event_store is not None:
         try:
-            alias = str(event_store.read_frontier_record(device_id).get("alias") or "").strip()
+            alias = str(
+                event_store.read_frontier_record(device_id).get("alias") or ""
+            ).strip()
         except Exception:
             alias = ""
         if alias:

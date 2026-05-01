@@ -4,6 +4,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, List, Optional
 
+if TYPE_CHECKING:
+    from sqlalchemy import Connection
+
 from sqlalchemy import (
     Boolean,
     DateTime,
@@ -16,7 +19,7 @@ from sqlalchemy import (
     literal,
     update,
 )
-from sqlalchemy.orm import Mapped, Relationship, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.orm.attributes import get_history
 
 from app.infrastructure.persistence.db.base_model import Base
@@ -69,13 +72,13 @@ class FileReference(Base):
     )
 
     # Relationships
-    parent: Relationship[Optional["FileReference"]] = relationship(
+    parent: Mapped[Optional["FileReference"]] = relationship(
         "FileReference", remote_side=[id], backref="children"
     )
-    file_entry: Relationship[Optional["FileEntry"]] = relationship(
+    file_entry: Mapped[Optional["FileEntry"]] = relationship(
         "FileEntry", back_populates="references"
     )
-    wal_entries: Relationship[List["WalEntry"]] = relationship(
+    wal_entries: Mapped[List["WalEntry"]] = relationship(
         "WalEntry", back_populates="file_reference"
     )
 
@@ -106,7 +109,9 @@ def generate_virtual_path(_mapper, _connection, target: FileReference) -> None:
 
 
 @event.listens_for(FileReference, "after_update")
-def propagate_path_to_children(mapper, connection, target: FileReference) -> None:
+def propagate_path_to_children(
+    _mapper, connection: Connection, target: FileReference
+) -> None:
     """Cascade a folder's virtual path change to all descendant rows."""
     if not target.is_folder:
         return

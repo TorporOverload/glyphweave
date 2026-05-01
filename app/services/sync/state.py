@@ -51,7 +51,7 @@ def build_conflict_info_and_persist(
     reason_code: str,
     reason_text: str,
     file_entry_id: int | None = None,
-) -> dict:
+) -> dict[str, object]:
     """Build a conflict info dict and persist a SyncConflict record.
     """
     from app.infrastructure.persistence.db.service.sync_conflict_service import (
@@ -72,7 +72,7 @@ def build_conflict_info_and_persist(
         "trigger_device_id": event.device_id,
     }
     if file_entry_id is not None:
-        conflict_info["file_entry_id"] = file_entry_id
+        conflict_info["file_entry_id"] = file_entry_id  # type: ignore[assignment]
 
     upsert_sync_conflict(
         session,
@@ -90,7 +90,7 @@ def build_conflict_info_and_persist(
         trigger_event_type=event.type.value,
         origin_device_id=event.device_id,
     )
-    return conflict_info
+    return conflict_info  # type: ignore[return-value]
 
 
 def get_ref_by_node_id(session: Session, node_id: str) -> FileReference | None:

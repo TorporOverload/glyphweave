@@ -9,7 +9,9 @@ from app.infrastructure.persistence.db.model.file_reference import FileReference
 from app.infrastructure.persistence.db.service.gc_service import GarbageCollector
 from app.infrastructure.persistence.db.service.session import session_scope
 from app.common.logging import logger
-from app.infrastructure.persistence.db.utils import escape_like_pattern as _escape_like_pattern
+from app.infrastructure.persistence.db.utils import (
+    escape_like_pattern as _escape_like_pattern,
+)
 
 
 class FolderService:

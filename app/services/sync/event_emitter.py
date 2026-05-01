@@ -18,61 +18,34 @@ if TYPE_CHECKING:
 
 
 class ParentRefLike(Protocol):
-    @property
-    def node_id(self) -> str: ...
+    node_id: str
 
 
 class BlobLike(Protocol):
-    @property
-    def blob_id(self) -> str: ...
+    blob_id: str
 
 
 class FileEntryLike(Protocol):
-    @property
-    def file_id(self) -> str: ...
-
-    @property
-    def content_hash(self) -> str: ...
-
-    @property
-    def mime_type(self) -> str: ...
-
-    @property
-    def original_size_bytes(self) -> int: ...
-
-    @property
-    def encrypted_size_bytes(self) -> int: ...
-
-    @property
-    def metadata_json(self) -> str | None: ...
-
-    @property
-    def blobs(self) -> Sequence[BlobLike]: ...
+    file_id: str
+    content_hash: str
+    mime_type: str
+    original_size_bytes: int
+    encrypted_size_bytes: int
+    metadata_json: str | None
+    blobs: Sequence[BlobLike]
 
 
 class FileRefLike(Protocol):
-    @property
-    def node_id(self) -> str: ...
-
-    @property
-    def name(self) -> str: ...
-
-    @property
-    def parent(self) -> ParentRefLike | None: ...
-
-    @property
-    def file_entry(self) -> FileEntryLike | None: ...
+    node_id: str
+    name: str
+    parent: ParentRefLike | None
+    file_entry: FileEntryLike | None
 
 
 class FolderRefLike(Protocol):
-    @property
-    def node_id(self) -> str: ...
-
-    @property
-    def name(self) -> str: ...
-
-    @property
-    def parent(self) -> ParentRefLike | None: ...
+    node_id: str
+    name: str
+    parent: ParentRefLike | None
 
 
 class EventEmitter:

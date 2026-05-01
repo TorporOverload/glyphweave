@@ -39,7 +39,7 @@ class VaultRuntimeService:
         return load_registry(self.context.app_data_dir)
 
     def delete_local_vault_record(self, vault_id: str) -> bool:
-        """Remove one vault from the local registry and delete its local runtime data."""
+        """Remove vault from local registry and delete its runtime data."""
         removed = remove_registry_entry(vault_id, self.context.app_data_dir)
         local_data_path = self.context.app_data_dir / "vaults" / vault_id
         shutil.rmtree(local_data_path, ignore_errors=True)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from app.common.paths.runtime_layout import runtime_cache_dir
 from app.infrastructure.persistence.db.model.file_reference import FileReference
@@ -15,7 +15,7 @@ from app.services.models import (
     VaultContext,
 )
 from app.services.runtime.event_store_factory import build_event_store
-from app.services.sync.event_emitter import EventEmitter
+from app.services.sync.event_emitter import EventEmitter, FolderRefLike
 
 from . import access, commands, queries
 from .helpers import normalize_vault_path
@@ -120,7 +120,7 @@ class VaultFileService:
             if existing is None:
                 existing = folder_service.create_folder(segment, parent_id)
                 if event_emitter is not None:
-                    event_emitter.emit_folder_create(existing)
+                    event_emitter.emit_folder_create(cast(FolderRefLike, existing))
             elif not existing.is_folder:
                 bad_path = "/" + "/".join(traversed)
                 raise NotADirectoryError(
@@ -238,9 +238,13 @@ class VaultFileService:
         return queries.search(self, query, limit)
 
     def search_page(
-        self, query: str, limit: int = 20, offset: int = 0
+        self,
+        query: str,
+        limit: int = 20,
+        offset: int = 0,
+        scope: str = "all",
     ) -> SearchPage:
-        return queries.search_page(self, query, limit, offset)
+        return queries.search_page(self, query, limit, offset, scope=scope)
 
     def reindex_pending(self, limit: int = 500) -> tuple[int, int]:
         return queries.reindex_pending(self, limit)
