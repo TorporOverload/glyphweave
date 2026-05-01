@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "cryptography>=46.0.4",
-    "kreuzberg>=4.4.1",
+    "kreuzberg==4.7.4",
     "mfusepy>=3.1.0",
     "mnemonic>=0.21",
     "sqlalchemy>=2.0.46",
