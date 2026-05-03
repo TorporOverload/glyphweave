@@ -90,6 +90,12 @@ class SyncConflictInfo:
     origin_device_id: str
     status: str
     created_at: datetime
+    # Database id of the archived FileReference, when one still exists
+    # (the FK is ``ON DELETE SET NULL``, so resolved/deleted conflicts may
+    # have ``None`` here). Used by the GUI to FUSE-open the archived copy
+    # without a virtual-path lookup, since archived entries are hidden
+    # from the file view's entry list.
+    archived_file_ref_id: int | None = None
 
 
 @dataclass

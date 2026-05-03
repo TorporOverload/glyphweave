@@ -92,6 +92,66 @@ def _contains_dhivehi_vowel_signs(text_value: str) -> bool:
     return any(char in DHIVEHI_VOWEL_SIGNS for char in text_value)
 
 
+def _contains_thaana(text_value: str) -> bool:
+    """Return True if text contains any Thaana script characters (consonants or vowels)."""
+    return any(0x0780 <= ord(ch) <= 0x07B1 for ch in text_value)
+
+
+def _normalize_thaana_for_fts(text_value: str) -> str:
+    """Normalize Thaana text to match FTS5 unicode61 tokenization.
+
+    The unicode61 tokenizer treats Thaana vowel signs (fili, U+07A6-U+07B0) as
+    token separators, shattering each Dhivehi word into individual consonant
+    tokens. This function strips fili and inserts spaces between consecutive
+    Thaana consonants so the query produces the same token sequence FTS5 stores.
+
+    Non-Thaana characters pass through unchanged.
+    """
+    result: list[str] = []
+    prev_was_thaana_consonant = False
+    for ch in text_value:
+        cp = ord(ch)
+        if 0x07A6 <= cp <= 0x07B0:
+            continue  # fili: FTS5 discards these during tokenization
+        is_thaana = (0x0780 <= cp <= 0x07A5) or cp == 0x07B1
+        if is_thaana and prev_was_thaana_consonant:
+            result.append(" ")
+        result.append(ch)
+        prev_was_thaana_consonant = is_thaana
+    return "".join(result)
+
+
+def _thaana_word_phrases(text_value: str) -> list[str]:
+    """Parse text into word-level FTS5 queries for Thaana-aware search.
+
+    Each Thaana word becomes a quoted phrase of its constituent consonants
+    (e.g. ``"ދ ވ ހ"`` for ``ދިވެހި``).  Non-Thaana words pass through as
+    plain terms.
+    """
+    phrases: list[str] = []
+    for word in text_value.split():
+        consonants: list[str] = []
+        has_thaana = False
+        for ch in word:
+            cp = ord(ch)
+            if 0x07A6 <= cp <= 0x07B0:
+                continue
+            if (0x0780 <= cp <= 0x07A5) or cp == 0x07B1:
+                consonants.append(ch)
+                has_thaana = True
+            else:
+                consonants.append(ch)
+        if not consonants:
+            continue
+        if has_thaana and len(consonants) > 1:
+            phrases.append('"' + " ".join(consonants) + '"')
+        elif has_thaana:
+            phrases.append(consonants[0])
+        else:
+            phrases.append("".join(consonants))
+    return phrases
+
+
 def _normalize_boolean_operators(text_value: str) -> str:
     parts = text_value.split('"')
     for index in range(0, len(parts), 2):
@@ -102,34 +162,102 @@ def _normalize_boolean_operators(text_value: str) -> str:
     return '"'.join(parts)
 
 
-def _prepare_fts_match_query(text_value: str, *, prefix_terms: bool) -> str:
-    normalized_text = _normalize_boolean_operators(text_value)
-    if (
-        not normalized_text
-        or '"' in normalized_text
-        or "(" in normalized_text
-        or ")" in normalized_text
-        or "*" in normalized_text
-        or ":" in normalized_text
-        or FTS_BOOLEAN_OPERATOR_PATTERN.search(normalized_text)
-    ):
-        return normalized_text
+def _is_user_fts_syntax(text_value: str) -> bool:
+    """Return True if the text already contains FTS5 syntax that should pass through unchanged."""
+    return bool(
+        '"' in text_value
+        or "(" in text_value
+        or ")" in text_value
+        or "*" in text_value
+        or ":" in text_value
+        or FTS_BOOLEAN_OPERATOR_PATTERN.search(text_value)
+    )
 
-    terms = FTS_QUERY_TOKEN_PATTERN.findall(normalized_text)
-    if not terms:
-        return normalized_text
 
+def _build_thaana_tiers(text_value: str, *, prefix_terms: bool) -> list[str]:
+    """Build FTS5 query tiers for Thaana-containing text.
+
+    Each Dhivehi word becomes a quoted phrase of its consonants so that
+    ``ދިވެހި`` and bare-consonant ``ދވހ`` both resolve to ``"ދ ވ ހ"``.
+
+    For multi-word queries the OR tier uses word-level phrases rather than
+    individual consonants, avoiding the single-consonant over-matching
+    problem inherent to FTS5's treatment of Thaana.
+    """
+    word_phrases = _thaana_word_phrases(text_value)
     if prefix_terms:
-        return " ".join(f"{term}*" for term in terms)
-    return " ".join(terms)
+        word_phrases = [
+            wp if wp.startswith('"') else f"{wp}*"
+            for wp in word_phrases
+        ]
+    if not word_phrases:
+        return [text_value]
+    if len(word_phrases) == 1:
+        return word_phrases
+
+    tiers: list[str] = []
+
+    all_thaana = all(wp.startswith('"') for wp in word_phrases)
+    if all_thaana:
+        fts_normalized = _normalize_thaana_for_fts(text_value)
+        consonants = FTS_QUERY_TOKEN_PATTERN.findall(fts_normalized)
+        if len(consonants) > 1:
+            tiers.append('"' + " ".join(consonants) + '"')
+
+    tiers.append(" ".join(word_phrases))
+    tiers.append(" OR ".join(word_phrases))
+    return tiers
 
 
-def _prepare_filename_match_query(text_value: str) -> str:
-    return _prepare_fts_match_query(text_value, prefix_terms=True)
+def _build_content_tiers(text_value: str) -> list[str]:
+    """Return FTS5 query strings for content search, from strictest to most permissive.
+
+    For a multi-word query like "ocean salt" this produces three tiers:
+      0. ``"ocean salt"``   — exact adjacent phrase (highest rank)
+      1. ``ocean salt``     — both terms anywhere in document (AND)
+      2. ``ocean OR salt``  — either term present (OR fallback)
+
+    Thaana (Dhivehi) queries use word-level consonant phrases instead of
+    individual tokens, avoiding single-consonant over-matching.
+    """
+    normalized = _normalize_boolean_operators(text_value)
+    if not normalized or _is_user_fts_syntax(normalized):
+        return [normalized]
+    if _contains_thaana(normalized):
+        return _build_thaana_tiers(normalized, prefix_terms=False)
+    terms = FTS_QUERY_TOKEN_PATTERN.findall(normalized)
+    if not terms:
+        return [normalized]
+    if len(terms) == 1:
+        return [terms[0]]
+    return [
+        '"' + " ".join(terms) + '"',  # Tier 0: exact phrase
+        " ".join(terms),               # Tier 1: all terms (AND)
+        " OR ".join(terms),            # Tier 2: any term (OR)
+    ]
 
 
-def _prepare_content_match_query(text_value: str) -> str:
-    return _prepare_fts_match_query(text_value, prefix_terms=False)
+def _build_filename_tiers(text_value: str) -> list[str]:
+    """Return FTS5 query strings for filename search, from strictest to most permissive.
+
+    Prefix wildcards (``*``) are appended to non-Thaana terms so partial
+    filename tokens match.  Thaana words use consonant-phrase matching.
+    """
+    normalized = _normalize_boolean_operators(text_value)
+    if not normalized or _is_user_fts_syntax(normalized):
+        return [normalized]
+    if _contains_thaana(normalized):
+        return _build_thaana_tiers(normalized, prefix_terms=True)
+    terms = FTS_QUERY_TOKEN_PATTERN.findall(normalized)
+    if not terms:
+        return [normalized]
+    if len(terms) == 1:
+        return [f"{terms[0]}*"]
+    return [
+        '"' + " ".join(terms) + '"',           # Tier 0: exact phrase
+        " ".join(f"{t}*" for t in terms),       # Tier 1: all terms prefix (AND)
+        " OR ".join(f"{t}*" for t in terms),    # Tier 2: any term prefix (OR)
+    ]
 
 
 def insert_document_content(
@@ -164,23 +292,42 @@ def search_content(
     query: str,
     limit: int = 20,
 ) -> list[tuple[str, str, float]]:
-    """Search indexed content and return `(file_entry_id, snippet, rank)` tuples."""
+    """Search indexed content and return `(file_entry_id, snippet, rank)` tuples.
+
+    Runs up to three FTS5 tiers (phrase → AND → OR) and merges results so that
+    phrase matches rank above scattered-term matches, which rank above single-term
+    matches.  Results from a higher tier always outrank results from a lower tier.
+    Within the same tier, BM25 order is preserved.
+    """
     normalized = query.strip()
     if not normalized:
         return []
 
-    statement = SEARCH_CONTENT_STATEMENT
-    params = {"query": _prepare_content_match_query(normalized), "limit": limit}
-    if _contains_dhivehi_vowel_signs(normalized):
-        statement = SEARCH_CONTENT_DHIVEHI_VOWEL_STATEMENT
-        params["exact_query"] = normalized
+    is_dhivehi = _contains_thaana(normalized)
+    tiers = _build_content_tiers(normalized)
 
-    try:
-        rows = session.execute(statement, params).fetchall()
-    except OperationalError:
-        logger.warning("Invalid FTS5 query syntax, returning empty results")
-        return []
-    return [(str(row[0]), row[1] or "", float(row[2])) for row in rows]
+    # seen[file_entry_id] = (tier_index, snippet, bm25_rank)
+    seen: dict[str, tuple[int, str, float]] = {}
+
+    for tier_idx, fts_query in enumerate(tiers):
+        statement = SEARCH_CONTENT_DHIVEHI_VOWEL_STATEMENT if is_dhivehi else SEARCH_CONTENT_STATEMENT
+        params: dict = {"query": fts_query, "limit": limit}
+        if is_dhivehi:
+            params["exact_query"] = normalized
+
+        try:
+            rows = session.execute(statement, params).fetchall()
+        except OperationalError:
+            logger.warning("Invalid FTS5 query syntax, skipping tier %d", tier_idx)
+            continue
+
+        for row in rows:
+            feid = str(row[0])
+            if feid not in seen:
+                seen[feid] = (tier_idx, row[1] or "", float(row[2]))
+
+    sorted_entries = sorted(seen.items(), key=lambda kv: (kv[1][0], kv[1][2]))
+    return [(feid, data[1], data[2]) for feid, data in sorted_entries[:limit]]
 
 
 def search_file_references(
@@ -188,27 +335,41 @@ def search_file_references(
     query: str,
     limit: int = 20,
 ) -> list[tuple[int, str, str, float]]:
-    """Search visible filenames via FTS and return ranked file reference hits."""
+    """Search visible filenames via FTS and return ranked file reference hits.
+
+    Runs up to three FTS5 tiers (phrase → AND-prefix → OR-prefix) so that a
+    query like "ocean salt" also surfaces files whose name contains only "salt".
+    """
     normalized = query.strip()
     if not normalized:
         return []
 
-    try:
-        rows = session.execute(
-            SEARCH_FILE_REFERENCES_STATEMENT,
-            {
-                "query": _prepare_filename_match_query(normalized),
-                "exact_query": normalized,
-                "limit": limit,
-                "use_dhivehi_exact_boost": int(
-                    _contains_dhivehi_vowel_signs(normalized)
-                ),
-            },
-        ).fetchall()
-    except OperationalError:
-        logger.warning("Invalid FTS5 query syntax, returning empty results")
-        return []
-    return [(int(row[0]), row[1], row[2], float(row[5])) for row in rows]
+    is_dhivehi = _contains_thaana(normalized)
+    tiers = _build_filename_tiers(normalized)
+
+    # seen[ref_id] = (tier_index, name, virtual_path, bm25_rank)
+    seen: dict[int, tuple[int, str, str, float]] = {}
+
+    for tier_idx, fts_query in enumerate(tiers):
+        params = {
+            "query": fts_query,
+            "exact_query": normalized,
+            "limit": limit,
+            "use_dhivehi_exact_boost": int(is_dhivehi),
+        }
+        try:
+            rows = session.execute(SEARCH_FILE_REFERENCES_STATEMENT, params).fetchall()
+        except OperationalError:
+            logger.warning("Invalid FTS5 query syntax, skipping tier %d", tier_idx)
+            continue
+
+        for row in rows:
+            ref_id = int(row[0])
+            if ref_id not in seen:
+                seen[ref_id] = (tier_idx, row[1], row[2], float(row[5]))
+
+    sorted_entries = sorted(seen.items(), key=lambda kv: (kv[1][0], kv[1][3]))
+    return [(ref_id, data[1], data[2], data[3]) for ref_id, data in sorted_entries[:limit]]
 
 
 def update_extraction_status(

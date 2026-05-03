@@ -12,6 +12,7 @@ from app.infrastructure.persistence.db.service.search import (
 from app.infrastructure.persistence.db.service.sync_conflict_service import (
     get_sync_conflict_by_id,
     list_active_sync_conflicts,
+    list_all_sync_conflicts,
 )
 from app.infrastructure.persistence.db.service.session import session_scope
 from app.services.content.extraction_service import ExtractionService
@@ -187,13 +188,19 @@ def get_recovery_phrase(service: VaultFileService) -> str:
     return key_service.unwrap_recovery_phrase_with_master()
 
 
-def list_sync_conflicts(service: VaultFileService) -> list[SyncConflictInfo]:
+def list_sync_conflicts(
+    service: VaultFileService, *, include_resolved: bool = False
+) -> list[SyncConflictInfo]:
     session_factory = service.context.session_factory
     if session_factory is None:
         raise RuntimeError("Session factory is not initialized")
 
     with session_scope(session_factory, commit=False) as session:
-        conflicts = list_active_sync_conflicts(session)
+        conflicts = (
+            list_all_sync_conflicts(session)
+            if include_resolved
+            else list_active_sync_conflicts(session)
+        )
         return [_to_sync_conflict_info(conflict) for conflict in conflicts]
 
 
@@ -234,7 +241,35 @@ def _to_sync_conflict_info(conflict: "SyncConflict") -> SyncConflictInfo:
         origin_device_id=conflict.origin_device_id,
         status=conflict.status,
         created_at=conflict.created_at,
+        archived_file_ref_id=conflict.archived_file_ref_id,
     )
+
+
+def get_trigger_event_payload(
+    service: VaultFileService, conflict_id: str
+) -> dict | None:
+    """Load the raw JSON payload of the event that produced ``conflict_id``.
+
+    Returns None when the event store is unavailable, the conflict has no
+    trigger hash, or the event object can't be read. Used by the conflict
+    dialog's "Inspect trigger event" overlay.
+    """
+    session_factory = service.context.session_factory
+    event_store = service.context.event_store
+    if session_factory is None or event_store is None:
+        return None
+
+    with session_scope(session_factory, commit=False) as session:
+        conflict = get_sync_conflict_by_id(session, conflict_id)
+        if conflict is None or not conflict.trigger_event_hash:
+            return None
+        event_hash = conflict.trigger_event_hash
+
+    try:
+        path = event_store.object_path(event_hash)
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
 
 
 def format_filename_snippet(file_name: str, query: str) -> str:

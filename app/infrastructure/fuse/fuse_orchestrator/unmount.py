@@ -52,14 +52,18 @@ def do_unmount(
             return False
 
     if background:
+        # Remove the entry eagerly so get_active_mounts() reflects the
+        # change immediately — callers that build a payload right after
+        # unmount() returns won't see the stale entry.  The captured
+        # `info` already holds every handle the teardown needs.
+        with lock:
+            mounts.pop(file_ref_id, None)
+
         def _run_background() -> None:
             success = unmount_info(file_ref_id, info)
-            if success:
-                with lock:
-                    mounts.pop(file_ref_id, None)
-            else:
+            if not success:
                 rt.logger.warning(
-                    "Unmount failed for %s, mount entry retained", file_ref_id
+                    "Background unmount cleanup failed for %s", file_ref_id
                 )
 
         thread = rt.threading.Thread(
@@ -118,14 +122,24 @@ def unmount_info(file_ref_id: int, info: MountInfo) -> bool:
     if info.process is not None:
         try:
             info.process.wait(timeout=10.0)
-        except Exception as e:
-            rt.logger.warning(f"Error killing FUSE process: {e}")
-
-        if info.process.poll() is None:
+        except Exception:
+            # Process didn't exit via CTRL_BREAK + net use — force kill it.
             try:
                 info.process.terminate()
             except Exception as e:
-                rt.logger.warning(f"Error killing FUSE process: {e}")
+                rt.logger.warning(f"Error terminating FUSE process: {e}")
+            # Wait for TerminateProcess to complete before touching the mount dir.
+            try:
+                info.process.wait(timeout=5.0)
+            except Exception as e:
+                rt.logger.warning(f"FUSE process did not exit after terminate: {e}")
+            # Re-run net use /delete now that the process is dead so WinFsp can
+            # finish unregistering the mount before we attempt rmtree.
+            try:
+                _run_unmount()
+            except Exception:
+                pass
+            time.sleep(0.5)
 
     if info.thread is not None:
         info.thread.join(timeout=10.0)
@@ -156,12 +170,17 @@ def unmount_info(file_ref_id: int, info: MountInfo) -> bool:
         )
         return False
 
-    try:
-        if info.mount_dir.exists():
-            rt.shutil.rmtree(info.mount_dir, ignore_errors=True)
-    except Exception as e:
-        rt.logger.warning(f"Failed to clean up mount dir {info.mount_dir}: {e}")
-        return False
+    for attempt in range(3):
+        try:
+            if info.mount_dir.exists():
+                rt.shutil.rmtree(info.mount_dir, ignore_errors=True)
+            break
+        except Exception as e:
+            if attempt < 2:
+                time.sleep(0.5)
+            else:
+                rt.logger.warning(f"Failed to clean up mount dir {info.mount_dir}: {e}")
+                return False
 
     return True
 

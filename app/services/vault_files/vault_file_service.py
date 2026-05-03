@@ -255,8 +255,12 @@ class VaultFileService:
     def get_recovery_phrase(self) -> str:
         return queries.get_recovery_phrase(self)
 
-    def list_sync_conflicts(self) -> list[SyncConflictInfo]:
-        return queries.list_sync_conflicts(self)
+    def list_sync_conflicts(
+        self, *, include_resolved: bool = False
+    ) -> list[SyncConflictInfo]:
+        return queries.list_sync_conflicts(
+            self, include_resolved=include_resolved
+        )
 
     def get_sync_conflict(self, conflict_id: str) -> SyncConflictInfo | None:
         return queries.get_sync_conflict(self, conflict_id)

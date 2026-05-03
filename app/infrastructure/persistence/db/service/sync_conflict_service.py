@@ -104,6 +104,18 @@ def list_active_sync_conflicts(session: Session) -> list[SyncConflict]:
     )
 
 
+def list_all_sync_conflicts(session: Session) -> list[SyncConflict]:
+    """Return every conflict regardless of status, newest first.
+
+    Used by the GUI's conflict dialog to populate the historical view when no active conflicts remain.
+    """
+    return list(
+        session.scalars(
+            select(SyncConflict).order_by(SyncConflict.created_at.desc())
+        ).all()
+    )
+
+
 def list_active_sync_conflicts_for_node_ids(
     session: Session,
     node_ids: Iterable[str],

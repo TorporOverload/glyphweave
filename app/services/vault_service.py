@@ -218,9 +218,94 @@ class VaultService:
         """Return debug information about the vault database."""
         return self.files.get_db_debug_info()
 
-    def list_sync_conflicts(self):
-        """Return active synchronized conflict records."""
-        return self.files.list_sync_conflicts()
+    def list_sync_conflicts(self, *, include_resolved: bool = False):
+        """Return synchronized conflict records.
+
+        With ``include_resolved=False`` (default) only ``status='active'``
+        conflicts are returned — matching the legacy callers. With
+        ``include_resolved=True`` resolved/deleted records are included so
+        the GUI can show historical conflicts when no active ones remain.
+        """
+        return self.files.list_sync_conflicts(include_resolved=include_resolved)
+
+    def delete_archived_conflict(self, conflict_id: str) -> int:
+        """Delete the archived copy of a conflict and mark it resolved.
+
+        Resolves the existing ``delete_entries`` flow's side effect of
+        marking active conflicts on the deleted node as ``status='deleted'``
+        — see ``vault_files/commands.py:delete_entries`` — so this method
+        is intentionally thin: look up the archived path, hand it to
+        ``delete_entries``, and let the shared bookkeeping run.
+        """
+        info = self.get_sync_conflict(conflict_id)
+        if info is None:
+            raise FileNotFoundError(f"Sync conflict not found: {conflict_id}")
+        if not info.archived_virtual_path:
+            raise ValueError(
+                f"Conflict {conflict_id} has no archived path to delete."
+            )
+        return self.files.delete_entries([info.archived_virtual_path])
+
+    def get_trigger_event_payload(self, conflict_id: str):
+        """Return the raw JSON payload of the event that produced the
+        conflict, or ``None`` if it cannot be loaded."""
+        from app.services.vault_files.queries import get_trigger_event_payload
+
+        return get_trigger_event_payload(self.files, conflict_id)
+
+    def resolve_device_alias(self, device_id: str) -> str | None:
+        """Return the configured global alias for ``device_id`` (or None).
+
+        Falls back to the per-device frontier-record alias when no global
+        alias has been set, matching the CLI's display behaviour.
+        """
+        from app.common.device_id import resolve_device_alias
+
+        alias = resolve_device_alias(self.context.app_data_dir, device_id)
+        if alias:
+            return alias
+        event_store = self.context.event_store
+        if event_store is None:
+            return None
+        try:
+            frontier_alias = str(
+                event_store.read_frontier_record(device_id).get("alias") or ""
+            ).strip()
+        except Exception:  # noqa: BLE001
+            frontier_alias = ""
+        return frontier_alias or None
+
+    def set_device_alias(
+        self, device_id: str, alias: str | None
+    ) -> str | None:
+        """Persist a local global alias for ``device_id``. Blank alias clears it."""
+        from app.common.device_id import set_device_alias
+
+        return set_device_alias(self.context.app_data_dir, device_id, alias)
+
+    def replay_pending_events(self):
+        """Run a replay pass over any unprocessed (or previously failed)
+        sync events for the currently open vault.
+
+        This is the user-facing "Sync now" path — it differs from the
+        background ``EventReplayRuntime`` only in that it runs synchronously
+        on the caller's thread (so the GUI can await the result and refresh)
+        and replays everything that has not been processed yet, including
+        events that were previously blocked waiting on a missing blob in
+        the cloud.
+        """
+        from app.services.sync.replay import replay_vault_events
+
+        ctx = self.context
+        if ctx.session_factory is None or ctx.event_store is None:
+            raise RuntimeError("No vault is currently unlocked.")
+        return replay_vault_events(
+            session_factory=ctx.session_factory,
+            vault_path=ctx.require_vault_path(),
+            store=ctx.event_store,
+            local_data_path=ctx.local_data_path,
+            app_data_dir=ctx.app_data_dir,
+        )
 
     def get_sync_conflict(self, conflict_id: str):
         """Return one synchronized conflict record by ID."""
