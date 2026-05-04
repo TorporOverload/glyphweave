@@ -70,3 +70,9 @@ qttest.py
 nul
 
 .zread/
+app-data/
+design_extra/
+graphify-out/
+.vs/
+# Git worktrees
+.worktrees/
