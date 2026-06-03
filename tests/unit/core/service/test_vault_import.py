@@ -76,7 +76,7 @@ def test_vault_service_repair_local_state_rebuilds_for_db_only_issues(
         issues=[SimpleNamespace(code="db_mismatch", message="db differs")],
     )
     repaired = SimpleNamespace(ok=True, issues=[])
-    cleanup_calls: list[bool] = []
+    cleanup_calls: list[tuple[bool, bool]] = []
     rebuild_calls: list[int] = []
     check_calls = {"count": 0}
 
@@ -85,11 +85,11 @@ def test_vault_service_repair_local_state_rebuilds_for_db_only_issues(
         return baseline if check_calls["count"] == 1 else repaired
 
     monkeypatch.setattr(service, "check_integrity", _check)
-    monkeypatch.setattr(
-        service,
-        "cleanup",
-        lambda *, flush_db_dump=True: cleanup_calls.append(flush_db_dump),
-    )
+
+    def _fake_cleanup(*, flush_db_dump: bool = True, reset_context: bool = True) -> None:
+        cleanup_calls.append((flush_db_dump, reset_context))
+
+    monkeypatch.setattr(service, "cleanup", _fake_cleanup)
     monkeypatch.setattr(
         service.runtime,
         "rebuild_local_runtime_state",
@@ -99,7 +99,9 @@ def test_vault_service_repair_local_state_rebuilds_for_db_only_issues(
     result = service.repair_local_state()
 
     assert result is repaired
-    assert cleanup_calls == [False]
+    # repair_local_state must not flush the db-dump and must keep the
+    # vault context populated so the rebuilt runtime can attach.
+    assert cleanup_calls == [(False, False)]
     assert rebuild_calls == [1]
 
 

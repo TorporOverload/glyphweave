@@ -30,7 +30,7 @@ class _FakeProcess:
         self.returncode = 0
         return 0
 
-    def send_signal(self, sig):
+    def send_signal(self, _sig):
         self.returncode = 0
 
 

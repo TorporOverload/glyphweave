@@ -8,7 +8,7 @@ import pytest
 import threading
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 from app.infrastructure.persistence.db.model.WAL_entry import WalEntry
 from app.infrastructure.persistence.db.model.file_entry import FileEntry

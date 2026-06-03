@@ -76,3 +76,7 @@ graphify-out/
 .vs/
 # Git worktrees
 .worktrees/
+
+scratch/
+Output/
+redist/

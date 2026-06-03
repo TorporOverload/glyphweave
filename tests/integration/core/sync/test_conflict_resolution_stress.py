@@ -1,7 +1,6 @@
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 import threading
-import queue
 import pytest
 
 from app.infrastructure.persistence.db.base import Base

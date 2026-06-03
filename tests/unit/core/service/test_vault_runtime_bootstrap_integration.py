@@ -37,13 +37,13 @@ def _fake_key_service() -> MagicMock:
 @patch("app.services.runtime.vault_runtime_bootstrap.DbBase")
 def test_bootstrap_repairs_missing_schema_objects(
     mock_db_base_cls: MagicMock,
-    mock_replay_runtime: MagicMock,
-    mock_fuse: MagicMock,
-    mock_build_store: MagicMock,
-    mock_install_dump: MagicMock,
-    mock_index: MagicMock,
-    mock_replay: MagicMock,
-    mock_restore: MagicMock,
+    _mock_replay_runtime: MagicMock,
+    _mock_fuse: MagicMock,
+    _mock_build_store: MagicMock,
+    _mock_install_dump: MagicMock,
+    _mock_index: MagicMock,
+    _mock_replay: MagicMock,
+    _mock_restore: MagicMock,
     tmp_path: Path,
 ) -> None:
     mock_db_instance = MagicMock()
@@ -78,13 +78,13 @@ def test_bootstrap_repairs_missing_schema_objects(
 @patch("app.services.runtime.vault_runtime_bootstrap.DbBase")
 def test_bootstrap_skips_repair_when_schema_complete(
     mock_db_base_cls: MagicMock,
-    mock_replay_runtime: MagicMock,
-    mock_fuse: MagicMock,
-    mock_build_store: MagicMock,
-    mock_install_dump: MagicMock,
-    mock_index: MagicMock,
-    mock_replay: MagicMock,
-    mock_restore: MagicMock,
+    _mock_replay_runtime: MagicMock,
+    _mock_fuse: MagicMock,
+    _mock_build_store: MagicMock,
+    _mock_install_dump: MagicMock,
+    _mock_index: MagicMock,
+    _mock_replay: MagicMock,
+    _mock_restore: MagicMock,
     tmp_path: Path,
 ) -> None:
     mock_db_instance = MagicMock()
@@ -113,13 +113,13 @@ def test_bootstrap_skips_repair_when_schema_complete(
 @patch("app.services.runtime.vault_runtime_bootstrap.DbBase")
 def test_bootstrap_with_missing_database_schema_objects(
     mock_db_base_cls: MagicMock,
-    mock_replay_runtime: MagicMock,
-    mock_fuse: MagicMock,
-    mock_build_store: MagicMock,
-    mock_install_dump: MagicMock,
-    mock_index: MagicMock,
-    mock_replay: MagicMock,
-    mock_restore: MagicMock,
+    _mock_replay_runtime: MagicMock,
+    _mock_fuse: MagicMock,
+    _mock_build_store: MagicMock,
+    _mock_install_dump: MagicMock,
+    _mock_index: MagicMock,
+    _mock_replay: MagicMock,
+    _mock_restore: MagicMock,
     tmp_path: Path,
 ) -> None:
     mock_db_instance = MagicMock()
@@ -152,13 +152,13 @@ def test_bootstrap_with_missing_database_schema_objects(
 @patch("app.services.runtime.vault_runtime_bootstrap.DbBase")
 def test_bootstrap_with_corrupted_search_index(
     mock_db_base_cls: MagicMock,
-    mock_replay_runtime: MagicMock,
-    mock_fuse: MagicMock,
-    mock_build_store: MagicMock,
-    mock_install_dump: MagicMock,
-    mock_index: MagicMock,
-    mock_replay: MagicMock,
-    mock_restore: MagicMock,
+    _mock_replay_runtime: MagicMock,
+    _mock_fuse: MagicMock,
+    _mock_build_store: MagicMock,
+    _mock_install_dump: MagicMock,
+    _mock_index: MagicMock,
+    _mock_replay: MagicMock,
+    _mock_restore: MagicMock,
     tmp_path: Path,
 ) -> None:
     mock_db_instance = MagicMock()

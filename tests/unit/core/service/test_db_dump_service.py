@@ -230,10 +230,10 @@ def test_db_dump_service_keeps_only_three_latest_versions(
             (),
             {
                 "now": staticmethod(
-                    lambda tz=None: type(
+                    lambda _tz=None: type(
                         "_Stamp",
                         (),
-                        {"strftime": lambda self, fmt: next(timestamps)},
+                        {"strftime": lambda self, _fmt: next(timestamps)},
                     )()
                 )
             },

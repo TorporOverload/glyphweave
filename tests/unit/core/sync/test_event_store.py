@@ -160,7 +160,7 @@ def test_discover_events_returns_all_valid_encrypted_objects(tmp_path) -> None:
 
 def test_event_store_rejects_bare_path() -> None:
     with pytest.raises(TypeError):
-        EventStore(Path("/tmp/fake-vault"))  # type: ignore[arg-type]
+        EventStore(Path("/tmp/fake-vault"))  # nosec: B108 - test fixture only
 
 
 def test_load_event_supports_plaintext_envelopes_when_encryption_disabled(tmp_path) -> None:

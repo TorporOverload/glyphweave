@@ -92,7 +92,7 @@ class _FakeLookupSession:
     def __init__(self, entry):
         self._entry = entry
 
-    def query(self, model):
+    def query(self, _model):
         return _FakeFileEntryQuery(self._entry)
 
     def scalars(self, stmt):

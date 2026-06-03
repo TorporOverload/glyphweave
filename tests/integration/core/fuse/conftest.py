@@ -80,7 +80,7 @@ def db_engine(temp_vault_path: Path, test_master_key: bytes, test_vault_id: byte
     )
 
     @event.listens_for(engine, "connect")
-    def _set_pragma_key(dbapi_conn, connection_record):
+    def _set_pragma_key(dbapi_conn, _connection_record):
         cursor = dbapi_conn.cursor()
         cursor.execute(f"PRAGMA key = \"x'{db_key_hex}'\"")
         cursor.execute("PRAGMA journal_mode=WAL;")

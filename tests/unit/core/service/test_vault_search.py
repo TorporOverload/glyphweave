@@ -38,7 +38,7 @@ class _FakeSession:
     def __init__(self, refs):
         self.refs = refs
 
-    def query(self, model):
+    def query(self, _model):
         return _FakeQuery(self.refs)
 
     def scalars(self, stmt):
@@ -323,12 +323,26 @@ def test_vault_service_search_page_delegates_to_file_service(
 ) -> None:
     service = VaultService(app_data_dir=tmp_path)
     expected = SearchPage(results=[], has_more=True)
+    captured: dict = {}
 
-    monkeypatch.setattr(
-        service.files, "search_page", lambda query, limit, offset: expected
-    )
+    def fake_search_page(query, limit, offset, *, scope="all"):
+        captured["query"] = query
+        captured["limit"] = limit
+        captured["offset"] = offset
+        captured["scope"] = scope
+        return expected
 
+    monkeypatch.setattr(service.files, "search_page", fake_search_page)
+
+    # Default scope is "all" when caller omits it.
     assert service.search_page("hello", 5, 20) == expected
+    assert captured == {"query": "hello", "limit": 5, "offset": 20, "scope": "all"}
+
+    # Explicit scope is forwarded to the file service.
+    assert (
+        service.search_page("hello", 5, 20, scope="filename") == expected
+    )
+    assert captured["scope"] == "filename"
 
 
 def test_vault_service_reindex_pending_delegates(tmp_path: Path, monkeypatch) -> None:

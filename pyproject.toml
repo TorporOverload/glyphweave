@@ -4,6 +4,15 @@ version = "0.1.0"
 description = "Privacy-focused, local-first document management with zero-knowledge cloud storage"
 readme = "README.md"
 requires-python = ">=3.13"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [{ name = "Ahmed Shameel" }]
+# PEP 639 ``license`` is the canonical source - don't duplicate the legacy
+# "License :: OSI Approved :: ..." classifier here.
+classifiers = [
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3.13",
+]
 dependencies = [
     "cryptography>=46.0.4",
     "kreuzberg==4.7.4",
@@ -16,8 +25,7 @@ dependencies = [
 ]
 
 [project.scripts]
-glyphweave = "app.ui.cli.main:main"
-glyphweave-gui = "app.ui.gui.glyphweave_ui:main"
+glyphweave = "app.glyphweave:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -36,6 +44,7 @@ dev = [
     "bandit>=1.9.3",
     "lizard>=1.22.1",
     "mypy>=1.20.2",
+    "pyinstaller>=6.20.0",
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",
     "ruff>=0.9.9",

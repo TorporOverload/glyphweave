@@ -49,9 +49,7 @@ def test_is_event_encryption_enabled_respects_case_insensitivity(monkeypatch) ->
     assert config.is_event_encryption_enabled() is False
 
 
-def test_is_event_encryption_enabled_accepts_various_true_values(
-    monkeypatch, request
-) -> None:
+def test_is_event_encryption_enabled_accepts_various_true_values(monkeypatch) -> None:
     true_values = {"1", "true", "yes", "on", "TRUE", "Yes", "ON"}
 
     for value in true_values:
@@ -59,9 +57,7 @@ def test_is_event_encryption_enabled_accepts_various_true_values(
         assert config.is_event_encryption_enabled() is True, f"failed for {value}"
 
 
-def test_is_event_encryption_enabled_accepts_various_false_values(
-    monkeypatch, request
-) -> None:
+def test_is_event_encryption_enabled_accepts_various_false_values(monkeypatch) -> None:
     false_values = {"0", "false", "no", "off", "FALSE", "No", "OFF"}
 
     for value in false_values:
