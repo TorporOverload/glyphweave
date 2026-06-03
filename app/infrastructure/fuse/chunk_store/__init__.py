@@ -1,11 +1,3 @@
-"""
-ChunkStore public API.
-
-This package keeps the historical import path
-`from app.infrastructure.fuse.chunk_store import ChunkStore, ChunkIndex`
-while splitting implementation into smaller modules.
-"""
-
 from pathlib import Path
 from typing import Dict, List
 

@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from app.services.sync.event_emitter import (
         FileEntryLike,
         FileRefLike,
@@ -94,6 +96,7 @@ def replay_vault_events(
     store: ReplayableStore,
     local_data_path: Path | None = None,
     app_data_dir: Path | None = None,
+    progress_callback: "Callable[[int, int, str], None] | None" = None,
 ) -> BatchProcessingResult:
     """Discover, sort, and apply immutable vault events."""
     processed_hashes = _load_processed_event_hashes(session_factory)
@@ -125,7 +128,15 @@ def replay_vault_events(
         processed_hashes=processed_hashes,
     )
     processor = EventProcessor(session_factory)
-    result = processor.process_batch(ordered)
+
+    def _batch_progress(current: int, total: int) -> None:
+        if progress_callback is not None:
+            progress_callback(current, total, "Syncing…")
+
+    result = processor.process_batch(
+        ordered,
+        progress_callback=_batch_progress if progress_callback else None,
+    )
     if isinstance(store, EventStore):
         _emit_conflict_resolution_events(
             result,

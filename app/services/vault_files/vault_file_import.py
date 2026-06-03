@@ -147,8 +147,6 @@ def add_file(
             parent_id=parent_id,
             file_entry_id=file_entry.id,
         )
-        if event_emitter is not None:
-            event_emitter.emit_file_add(cast("FileRefLike", created_ref))
 
         indexed = False
         if indexing_service is not None:
@@ -165,6 +163,14 @@ def add_file(
                 f"Import indexing result: destination={destination_name}, "
                 f"entry_id={file_entry.id}, indexed={indexed}"
             )
+
+        if event_emitter is not None:
+            # Indexing wrote metadata_json on the FileEntry in a separate session;
+            # patch the in-memory copy so the emitted event captures it.
+            refreshed_entry = file_service.get_file_entry_by_file_id(file_entry.file_id)
+            if refreshed_entry is not None and created_ref.file_entry is not None:
+                created_ref.file_entry.metadata_json = refreshed_entry.metadata_json
+            event_emitter.emit_file_add(cast("FileRefLike", created_ref))
 
         return AddFileResult(
             file_name=destination_name,

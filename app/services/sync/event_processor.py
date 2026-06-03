@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 from app.common.logging import logger
 from app.core.domain.sync.hashing import hash_event
@@ -71,8 +76,25 @@ class EventProcessor:
     def process_discovered_event(self, discovered: DiscoveredEvent) -> ProcessingResult:
         return self.process_event(discovered.event)
 
-    def process_batch(self, events: list[DiscoveredEvent]) -> BatchProcessingResult:
-        results = [self.process_discovered_event(event) for event in events]
+    def process_batch(
+        self,
+        events: list[DiscoveredEvent],
+        *,
+        progress_callback: "Callable[[int, int], None] | None" = None,
+    ) -> BatchProcessingResult:
+        """Apply ``events`` in order.
+
+        ``progress_callback`` is invoked with ``(current, total)`` *after*
+        each event has been processed, where ``current`` is the 1-based
+        index of the event that just finished. So a UI reading the values
+        shows "finished N of M", not "about to start N of M".
+        """
+        results: list[ProcessingResult] = []
+        total = len(events)
+        for i, event in enumerate(events):
+            results.append(self.process_discovered_event(event))
+            if progress_callback is not None:
+                progress_callback(i + 1, total)
         successful = sum(
             1
             for result in results

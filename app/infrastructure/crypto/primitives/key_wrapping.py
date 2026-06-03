@@ -17,8 +17,6 @@ def _key_to_bytes(value: KeyMaterial) -> bytes:
         return value
     if isinstance(value, (bytearray, memoryview)):
         return bytes(value)
-    raise TypeError(f"Unsupported key material type: {type(value).__name__}")
-
 
 @timed_operation("wrap_key")
 def wrap_key(key_encryption_key: KeyMaterial, key_to_wrap: KeyMaterial) -> bytes:

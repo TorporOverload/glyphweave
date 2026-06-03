@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from app.common.config import ensure_app_data_layout, get_app_data_dir
 from app.infrastructure.crypto.types import KDFParams
@@ -11,6 +12,9 @@ from app.services.vault_integrity_service import (
     VaultIntegrityReport,
     VaultIntegrityService,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class VaultService:
@@ -283,7 +287,10 @@ class VaultService:
 
         return set_device_alias(self.context.app_data_dir, device_id, alias)
 
-    def replay_pending_events(self):
+    def replay_pending_events(
+        self,
+        progress_callback: "Callable[[int, int, str], None] | None" = None,
+    ):
         """Run a replay pass over any unprocessed (or previously failed)
         sync events for the currently open vault.
 
@@ -305,6 +312,7 @@ class VaultService:
             store=ctx.event_store,
             local_data_path=ctx.local_data_path,
             app_data_dir=ctx.app_data_dir,
+            progress_callback=progress_callback,
         )
 
     def get_sync_conflict(self, conflict_id: str):
@@ -338,13 +346,26 @@ class VaultService:
                 + ", ".join(unsafe_codes)
             )
 
-        self.cleanup(flush_db_dump=False)
+        self.cleanup(flush_db_dump=False, reset_context=False)
         self.runtime.rebuild_local_runtime_state()
         return self.check_integrity()
 
-    def cleanup(self, *, flush_db_dump: bool = True) -> None:
-        """Finalize all open files and release vault resources."""
-        self.files.cleanup(flush_db_dump=flush_db_dump)
+    def cleanup(
+        self,
+        *,
+        flush_db_dump: bool = True,
+        reset_context: bool = True,
+    ) -> None:
+        """Finalize all open files and release vault resources.
+
+        With ``reset_context=True`` (the default), every field on the shared
+        :class:`VaultContext` is nulled out so a subsequent vault unlock
+        cannot accidentally observe state from the previously locked vault.
+        """
+        self.files.cleanup(
+            flush_db_dump=flush_db_dump,
+            reset_context=reset_context,
+        )
 
 
 __all__ = ["VaultService"]

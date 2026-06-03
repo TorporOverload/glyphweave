@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from app.common.logging import logger
 from app.infrastructure.persistence.db_dump_service import flush_db_dump_hook
 from app.infrastructure.platform.launcher import open_with_default_app
 from app.services.models import UnlockedFileInfo
@@ -63,7 +64,12 @@ def unmount_unlocked(service: "VaultFileService", file_ref_id: int) -> str:
     )
 
 
-def cleanup(service: "VaultFileService", *, flush_db_dump: bool = True) -> None:
+def cleanup(
+    service: "VaultFileService",
+    *,
+    flush_db_dump: bool = True,
+    reset_context: bool = True,
+) -> None:
     runtime = service.context.event_replay_runtime
     if runtime is not None:
         runtime.stop()
@@ -91,3 +97,39 @@ def cleanup(service: "VaultFileService", *, flush_db_dump: bool = True) -> None:
     session_factory = service.context.session_factory
     if flush_db_dump and session_factory is not None:
         flush_db_dump_hook(session_factory)
+
+    if reset_context:
+        _reset_vault_context(service)
+
+
+def _reset_vault_context(service: "VaultFileService") -> None:
+    ctx = service.context
+    master_key = ctx.master_key
+    if master_key is not None:
+        try:
+            master_key.clear()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Failed to clear master key during vault cleanup: %s",
+                exc,
+                exc_info=True,
+            )
+
+    service.fallback_opens.clear()
+
+    ctx.vault_id = None
+    ctx.vault_name = None
+    ctx.vault_path = None
+    ctx.local_data_path = None
+    ctx.key_service = None
+    ctx.encryption_service = None
+    ctx.db = None
+    ctx.db_key_hex = None
+    ctx.session_factory = None
+    ctx.file_service = None
+    ctx.folder_service = None
+    ctx.mounts = None
+    ctx.master_key = None
+    ctx.event_store = None
+    ctx.event_emitter = None
+    ctx.event_replay_runtime = None

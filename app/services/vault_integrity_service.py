@@ -366,7 +366,7 @@ class VaultIntegrityService:
                     row.event_id,
                     row.event_type,
                     row.device_id,
-                    row.status,
+                    self._canonical_processed_status(row.status),
                 )
                 for row in processed
             },
@@ -414,6 +414,16 @@ class VaultIntegrityService:
                 for row in node_states
             },
         }
+
+    @staticmethod
+    def _canonical_processed_status(status: str | None) -> str | None:
+        # Local-first imports apply DB state directly, then emit the event;
+        # subsequent replay finds the node already exists and records
+        # SKIPPED_IDEMPOTENT, while a fresh rebuild from events records SUCCESS.
+        # Both represent the same end state, so collapse them here.
+        if status in {"success", "skipped_idempotent"}:
+            return "applied"
+        return status
 
     @classmethod
     def _snapshot_ref(
