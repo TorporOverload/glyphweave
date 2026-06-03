@@ -1,0 +1,58 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download WinFsp MSI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force -Path redist
+          gh release download --repo winfsp/winfsp --pattern "winfsp-*.msi" --dir redist
+          Get-ChildItem redist\*.msi | Select-Object -First 1 | Rename-Item -NewName "winfsp.msi"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install Python 3.13
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: Extract version from tag
+        id: version
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          $version = $env:REF_NAME.TrimStart('v')
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Build with PyInstaller
+        run: uv run pyinstaller glyphweave.spec
+
+      - name: Package with Inno Setup
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          & $iscc "/DMyAppVersion=$env:APP_VERSION" installer.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Output\glyphweave-setup-*.exe
+          generate_release_notes: true
