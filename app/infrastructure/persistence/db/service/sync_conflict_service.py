@@ -150,7 +150,7 @@ def resolve_sync_conflict(
         return None
 
     if conflict.status != "active":
-        return conflict  # already resolved — no-op for idempotent replay
+        return conflict  # already resolved - no-op for idempotent replay
 
     conflict.status = status
     conflict.resolution_event_id = resolution_event_id

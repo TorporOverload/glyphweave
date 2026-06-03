@@ -1,0 +1,50 @@
+from __future__ import annotations
+
+
+PH_ICON_MAP: dict[str, str] = {
+    "hard-drive": "hard-drive.svg",
+    "caret-right": "caret-right.svg",
+    "magnifying-glass": "magnifying-glass.svg",
+    "bell": "bell.svg",
+    "file-text": "file-text.svg",
+    "folder": "folder.svg",
+    "file-pdf": "file-pdf.svg",
+    "file-xls": "file-xls.svg",
+    "file-image": "file-image.svg",
+    "file-code": "file-code.svg",
+    "file-archive": "file-archive.svg",
+    "file-audio": "file-audio.svg",
+    "pencil-simple": "pencil-simple.svg",
+    "arrows-out-cardinal": "arrows-out-cardinal.svg",
+    "copy": "copy.svg",
+    "trash": "trash.svg",
+    "clipboard": "clipboard.svg",
+    "export": "export.svg",
+    "file-arrow-down": "file-arrow-down.svg",
+    "folder-plus": "folder-plus.svg",
+    "check-circle": "check-circle.svg",
+    "download-simple": "download-simple.svg",
+    "arrows-clockwise": "arrows-clockwise.svg",
+    "user-circle": "user-circle.svg",
+    "x": "x.svg",
+    "arrow-square-out": "arrow-square-out.svg",
+}
+
+
+FILE_ICON_MAP: dict[str, tuple[str, str]] = {
+    ".pdf": ("file-pdf", "#bf616a"),
+    ".xls": ("file-xls", "#2e9961"),
+    ".xlsx": ("file-xls", "#2e9961"),
+    ".csv": ("file-xls", "#2e9961"),
+    ".png": ("file-image", "#7d5c87"),
+    ".jpg": ("file-image", "#7d5c87"),
+    ".jpeg": ("file-image", "#7d5c87"),
+    ".gif": ("file-image", "#7d5c87"),
+    ".md": ("file-code", "#4c566a"),
+    ".json": ("file-code", "#5e81ac"),
+    ".qmd": ("file-code", "#5e81ac"),
+    ".py": ("file-code", "#5e81ac"),
+    ".zip": ("file-archive", "#434c5e"),
+    ".wav": ("file-audio", "#d08770"),
+    ".mp3": ("file-audio", "#d08770"),
+}

@@ -11,19 +11,17 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.ui.gui.setup.theme import (
-    apply_alert_variant,
-    apply_badge_variant,
-    apply_button,
-    apply_card_style,
-    apply_text_style,
-)
-from app.ui.gui.setup.tokens import (
+from app.ui.gui.setup import (
     TOKENS,
     AlertVariant,
     BadgeVariant,
     ButtonVariant,
     StatusKey,
+    apply_alert_variant,
+    apply_badge_variant,
+    apply_button,
+    apply_card_style,
+    apply_text_style,
 )
 
 

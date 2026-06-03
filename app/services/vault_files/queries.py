@@ -70,9 +70,9 @@ def search_page(
     """Return one page of search results.
 
     ``scope`` selects which index branches are queried:
-      * ``"all"``      — filename and content.
-      * ``"filename"`` — filename matches only.
-      * ``"content"``  — full-text content matches only.
+      * ``"all"``      - filename and content.
+      * ``"filename"`` - filename matches only.
+      * ``"content"``  - full-text content matches only.
     """
     if scope not in ("all", "filename", "content"):
         raise ValueError(f"Unknown search scope: {scope!r}")

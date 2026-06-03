@@ -226,7 +226,7 @@ class VaultService:
         """Return synchronized conflict records.
 
         With ``include_resolved=False`` (default) only ``status='active'``
-        conflicts are returned — matching the legacy callers. With
+        conflicts are returned - matching the legacy callers. With
         ``include_resolved=True`` resolved/deleted records are included so
         the GUI can show historical conflicts when no active ones remain.
         """
@@ -237,7 +237,7 @@ class VaultService:
 
         Resolves the existing ``delete_entries`` flow's side effect of
         marking active conflicts on the deleted node as ``status='deleted'``
-        — see ``vault_files/commands.py:delete_entries`` — so this method
+        - see ``vault_files/commands.py:delete_entries`` - so this method
         is intentionally thin: look up the archived path, hand it to
         ``delete_entries``, and let the shared bookkeeping run.
         """
@@ -294,7 +294,7 @@ class VaultService:
         """Run a replay pass over any unprocessed (or previously failed)
         sync events for the currently open vault.
 
-        This is the user-facing "Sync now" path — it differs from the
+        This is the user-facing "Sync now" path - it differs from the
         background ``EventReplayRuntime`` only in that it runs synchronously
         on the caller's thread (so the GUI can await the result and refresh)
         and replays everything that has not been processed yet, including

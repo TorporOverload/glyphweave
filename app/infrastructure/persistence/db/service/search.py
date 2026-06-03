@@ -213,9 +213,9 @@ def _build_content_tiers(text_value: str) -> list[str]:
     """Return FTS5 query strings for content search, from strictest to most permissive.
 
     For a multi-word query like "ocean salt" this produces three tiers:
-      0. ``"ocean salt"``   — exact adjacent phrase (highest rank)
-      1. ``ocean salt``     — both terms anywhere in document (AND)
-      2. ``ocean OR salt``  — either term present (OR fallback)
+      0. ``"ocean salt"``   - exact adjacent phrase (highest rank)
+      1. ``ocean salt``     - both terms anywhere in document (AND)
+      2. ``ocean OR salt``  - either term present (OR fallback)
 
     Thaana (Dhivehi) queries use word-level consonant phrases instead of
     individual tokens, avoiding single-consonant over-matching.

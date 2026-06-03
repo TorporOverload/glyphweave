@@ -53,7 +53,7 @@ def do_unmount(
 
     if background:
         # Remove the entry eagerly so get_active_mounts() reflects the
-        # change immediately — callers that build a payload right after
+        # change immediately - callers that build a payload right after
         # unmount() returns won't see the stale entry.  The captured
         # `info` already holds every handle the teardown needs.
         with lock:
@@ -123,7 +123,7 @@ def unmount_info(file_ref_id: int, info: MountInfo) -> bool:
         try:
             info.process.wait(timeout=10.0)
         except Exception:
-            # Process didn't exit via CTRL_BREAK + net use — force kill it.
+            # Process didn't exit via CTRL_BREAK + net use - force kill it.
             try:
                 info.process.terminate()
             except Exception as e:
