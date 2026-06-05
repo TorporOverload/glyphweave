@@ -9,13 +9,13 @@ from PySide6.QtWidgets import QMessageBox
 
 from app.common.logging import logger
 
-from . import tasks as _tasks
 from ..gui_utils import (
     CreatedVaultResult,
     FileViewPayload,
     PreparedVaultResult,
 )
 from ..screens import VaultListEntry
+from . import tasks as _tasks
 
 if TYPE_CHECKING:
     from ..glyphweave_ui import GlypheaveGUI
@@ -70,9 +70,7 @@ def show_lock_screen(window: "GlypheaveGUI") -> None:
     window.lock_screen.passphrase_input.setFocus()
 
 
-def show_lock_screen_for_vault(
-    window: "GlypheaveGUI", vault_id: str
-) -> None:
+def show_lock_screen_for_vault(window: "GlypheaveGUI", vault_id: str) -> None:
     entry = window.vault_list_screen.entry_for_id(vault_id)
     if entry is None:
         window._show_error(
@@ -108,9 +106,7 @@ def refresh_file_view(window: "GlypheaveGUI") -> None:
     )
 
 
-def handle_create_vault(
-    window: "GlypheaveGUI", _vault_name: str
-) -> None:
+def handle_create_vault(window: "GlypheaveGUI", _vault_name: str) -> None:
     frame = window.create_vault_screen.new_vault_frame
     vault_name = frame.name_input.text().strip()
     location_text = frame.location_input.text().strip()
@@ -135,9 +131,7 @@ def handle_create_vault(
         return
 
     parent_dir = (
-        Path(location_text).expanduser()
-        if location_text
-        else Path.home() / "Vaults"
+        Path(location_text).expanduser() if location_text else Path.home() / "Vaults"
     )
     vault_path = parent_dir / vault_name
     window._run_task(
@@ -203,9 +197,8 @@ def clear_pending_recovery_words(window: "GlypheaveGUI") -> None:
 
 # Result handlers
 
-def handle_initial_entries_loaded(
-    window: "GlypheaveGUI", result: object
-) -> None:
+
+def handle_initial_entries_loaded(window: "GlypheaveGUI", result: object) -> None:
     entries = list(result) if isinstance(result, list) else []
     if entries:
         show_vault_list_entries(window, entries)
@@ -213,9 +206,7 @@ def handle_initial_entries_loaded(
     show_create_vault_screen(window)
 
 
-def handle_created_vault(
-    window: "GlypheaveGUI", result: object
-) -> None:
+def handle_created_vault(window: "GlypheaveGUI", result: object) -> None:
     if not isinstance(result, CreatedVaultResult):
         raise TypeError("Unexpected vault creation result.")
     window._selected_vault_id = result.vault_id
@@ -228,7 +219,7 @@ def handle_created_vault(
 
 
 def show_recovery_phrase_screen(window: "GlypheaveGUI") -> None:
-    """"Back to phrase" target from the confirm screen."""
+    """ "Back to phrase" target from the confirm screen."""
     window.stack.setCurrentWidget(window.recovery_phrase_screen)
 
 
@@ -243,9 +234,7 @@ def show_confirm_phrase_screen(window: "GlypheaveGUI") -> None:
     window.stack.setCurrentWidget(window.confirm_phrase_screen)
 
 
-def handle_unlocked_vault(
-    window: "GlypheaveGUI", result: object
-) -> None:
+def handle_unlocked_vault(window: "GlypheaveGUI", result: object) -> None:
     if not isinstance(result, FileViewPayload):
         raise TypeError("Unexpected unlock result.")
     window.lock_screen.set_loading(False)
@@ -256,9 +245,7 @@ def handle_unlocked_vault(
     window.app_shell.start_sync()
 
 
-def handle_vault_list_loaded(
-    window: "GlypheaveGUI", result: object
-) -> None:
+def handle_vault_list_loaded(window: "GlypheaveGUI", result: object) -> None:
     entries = list(result) if isinstance(result, list) else []
     if not entries:
         show_create_vault_screen(window)
@@ -292,9 +279,7 @@ def handle_delete_vault(window: "GlypheaveGUI", vault_id: str) -> None:
     )
 
 
-def _after_vault_deleted(
-    window: "GlypheaveGUI", entry, result: object
-) -> None:
+def _after_vault_deleted(window: "GlypheaveGUI", entry, result: object) -> None:
     handle_vault_list_loaded(window, result)
     window.add_toast("success", f"Vault “{entry.name}” record removed.")
     follow_up = QMessageBox(window)
@@ -308,9 +293,7 @@ def _after_vault_deleted(
         "contents yourself:\n\n"
         f"{entry.path}"
     )
-    open_btn = follow_up.addButton(
-        "Open folder", QMessageBox.ButtonRole.ActionRole
-    )
+    open_btn = follow_up.addButton("Open folder", QMessageBox.ButtonRole.ActionRole)
     close_btn = follow_up.addButton("Close", QMessageBox.ButtonRole.AcceptRole)
     follow_up.setDefaultButton(close_btn)
     follow_up.exec()
@@ -318,9 +301,7 @@ def _after_vault_deleted(
         QDesktopServices.openUrl(QUrl.fromLocalFile(entry.path))
 
 
-def handle_prepared_vault(
-    window: "GlypheaveGUI", result: object
-) -> None:
+def handle_prepared_vault(window: "GlypheaveGUI", result: object) -> None:
     if not isinstance(result, PreparedVaultResult):
         raise TypeError("Unexpected prepared vault result.")
     window._selected_vault_id = result.vault_id
@@ -345,9 +326,7 @@ def apply_file_view_payload(
     # Route through AppShell so the sidebar header, vault selector,
     # status-footer counts, and search-screen state all update together
     # - calling file_view.set_vault_data directly skips the chrome.
-    window.app_shell.set_vault_data(
-        payload, preserve_navigation=not show_screen
-    )
+    window.app_shell.set_vault_data(payload, preserve_navigation=not show_screen)
     if show_screen:
         window.app_shell.navigate("Library")
         window.stack.setCurrentWidget(window.app_shell)
@@ -404,6 +383,7 @@ def handle_lock_request(window: "GlypheaveGUI") -> None:
         window.app_shell.lock_all_unlocked()
     window.app_shell.clear()
     vault_path = window.service.vault_path
+    vault_name = window.service.vault_name or ""
     try:
         window.service.cleanup()
     except Exception as exc:  # noqa: BLE001
@@ -412,8 +392,13 @@ def handle_lock_request(window: "GlypheaveGUI") -> None:
         try:
             window.service.prepare_existing_vault(vault_path)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Failed to re-prepare vault after lock: %s", exc, exc_info=True)
+            logger.warning(
+                "Failed to re-prepare vault after lock: %s", exc, exc_info=True
+            )
     window._set_vault_unlocked_in_menu(False)
+    window.lock_screen.set_vault_details(
+        vault_name, str(vault_path) if vault_path else ""
+    )
     show_lock_screen(window)
     window.add_toast("info", "Vault locked.")
 
@@ -426,9 +411,7 @@ def _confirm_lock_unlocked_files(
     box.setIcon(QMessageBox.Icon.Warning)
     box.setWindowTitle(title)
     box.setText(text)
-    proceed = box.addButton(
-        "Lock and continue", QMessageBox.ButtonRole.AcceptRole
-    )
+    proceed = box.addButton("Lock and continue", QMessageBox.ButtonRole.AcceptRole)
     cancel = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
     box.setDefaultButton(cancel)
     box.exec()
@@ -441,5 +424,3 @@ def show_vault_list_entries(
     window.vault_list_screen.set_vaults(entries)
     window.stack.setCurrentWidget(window.vault_list_screen)
     window.vault_list_screen.focus_first_vault()
-
-

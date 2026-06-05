@@ -3,12 +3,18 @@ set shell := ["powershell", "-NoLogo", "-Command"]
 run:
     $env:GLYPHWEAVE_DEBUG = "3"; \
     $env:GLYPHWEAVE_EVENT_ENCRYPTION = "0"; \
-    uv run glyphweave
+    uv run glyphweave cli
     
 run-gui:
     $env:GLYPHWEAVE_DEBUG = "3"; \
     $env:GLYPHWEAVE_EVENT_ENCRYPTION = "0"; \
-    uv run glyphweave-gui
+    uv run glyphweave
+
+run-dev:
+    $env:GLYPHWEAVE_APP_DATA_DIR = "test_data/app_data"; \
+    $env:GLYPHWEAVE_DEBUG = "3"; \
+    $env:GLYPHWEAVE_EVENT_ENCRYPTION = "0"; \
+    uv run glyphweave
 
 test target='' output='0':
     $env:GLYPHWEAVE_DEBUG = "3"; \

@@ -115,7 +115,12 @@ class EmptyVaultBackground(QWidget):
         set_properties(copy_label, role=Role.SPLASH_COPY)
         note_layout.addWidget(copy_label, 1)
 
-        root.addWidget(note_frame, 0, Qt.AlignmentFlag.AlignHCenter)
+        _note_row = QHBoxLayout()
+        _note_row.setContentsMargins(0, 0, 0, 0)
+        _note_row.addStretch()
+        _note_row.addWidget(note_frame)
+        _note_row.addStretch()
+        root.addLayout(_note_row)
         note_frame.setMaximumWidth(560)
 
         root.addSpacing(20)
