@@ -49,7 +49,7 @@ class GlypheaveGUI(QMainWindow):
         super().__init__()
         self._center_on_show = True
         self._shutdown_started = False
-        self.setWindowTitle("glyphweave - secure file vault")
+        self.setWindowTitle("glyphweave: secure file vault")
         self.setWindowIcon(load_app_icon())
         self.resize(1440, 920)
         # Track every in-flight TaskThread so we can wait on them during
