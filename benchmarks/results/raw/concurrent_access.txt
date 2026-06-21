@@ -1,0 +1,14 @@
+Concurrent File Access Benchmark
+================================
+
+Max concurrency at 100% correctness
+-----------------------------------
+64
+
+Stop reason
+-----------
+correctness_break_at_T=128
+
+Levels tested
+-------------
+1, 2, 4, 8, 16, 32, 64, 128

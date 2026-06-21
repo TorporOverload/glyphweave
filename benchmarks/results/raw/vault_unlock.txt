@@ -1,0 +1,18 @@
+Vault Unlock Benchmark
+======================
+
+End-to-end unlock
+-----------------
+mean=0.908s median=0.888s stdev=0.053s (n=5)
+
+KDF + master-key unwrap
+-----------------------
+mean=0.809s (89.1% of unlock)
+
+Bootstrap + DB open + I/O (derived)
+-----------------------------------
+mean=0.099s
+
+First-file mount (cold)
+-----------------------
+0.508s

@@ -50,6 +50,12 @@ dev = [
     "ruff>=0.9.9",
     "vulture>=2.16",
 ]
+bench = [
+    "matplotlib>=3.9",
+    "scienceplots>=2.1",
+    "numpy>=2.0",
+    "scikit-learn>=1.5",
+]
 
 [tool.coverage.run]
 source = ["app"]

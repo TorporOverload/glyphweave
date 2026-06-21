@@ -1,0 +1,16 @@
+Search Accuracy Benchmark
+=========================
+
+Positive queries
+----------------
+n=125 MAP=0.869 meanP@10=0.699 meanR@10=0.896
+
+Negative queries
+----------------
+n=25 specificity(zero-result)=0.960 mean_spurious_hits=0.16
+
+By scope (MAP / specificity)
+----------------------------
+  content: MAP=0.794 specificity=1.000
+  filename: MAP=0.951 specificity=1.000
+  both: MAP=0.980 specificity=0.857

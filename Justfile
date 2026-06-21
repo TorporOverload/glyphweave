@@ -29,3 +29,9 @@ test target='' output='0':
     } else { \
     uv run -m pytest -q $pytest_tmp {{target}} \
     }
+
+bench *args:
+    uv run python -m benchmarks.run_all {{args}}
+
+bench-quick:
+    uv run python -m benchmarks.run_all --quick

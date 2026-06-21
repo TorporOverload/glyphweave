@@ -80,3 +80,8 @@ graphify-out/
 scratch/
 Output/
 redist/
+
+# Benchmark build artifacts (benchmarks/results/ stays tracked)
+benchmarks/.vaults/
+benchmarks/.cache/
+.test_tmp/

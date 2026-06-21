@@ -1,0 +1,22 @@
+FUSE I/O Throughput Benchmark
+=============================
+
+in_process / write
+------------------
+peak=17.1 MB/s; max size sustained=4096 MiB
+
+in_process / read
+-----------------
+peak=405.0 MB/s; max size sustained=4096 MiB
+
+real_mount / write
+------------------
+peak=23.5 MB/s; max size sustained=2048 MiB
+
+real_mount / read
+-----------------
+peak=2617.8 MB/s; max size sustained=2048 MiB
+
+Caveat
+------
+Real-mount reads may be inflated by the Windows/WinFsp page cache; the in-process layer is cache-free.

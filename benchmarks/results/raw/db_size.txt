@@ -1,0 +1,17 @@
+Storage Footprint vs Corpus Size
+================================
+
+On-disk size by corpus size (MiB)
+---------------------------------
+  docs=    50  corpus=  55.78  vault=  56.10  [blobs= 55.81 snapshot=  0.20 events= 0.10 other=0.00]  working_db=  5.73
+  docs=   100  corpus=  90.68  vault=  91.11  [blobs= 90.72 snapshot=  0.20 events= 0.19 other=0.00]  working_db=  7.14
+  docs=   250  corpus= 322.13  vault= 322.95  [blobs=322.28 snapshot=  0.20 events= 0.48 other=0.00]  working_db= 17.40
+  docs=   500  corpus= 628.04  vault= 629.48  [blobs=628.33 snapshot=  0.20 events= 0.96 other=0.00]  working_db= 27.49
+  docs=  1000  corpus=1301.10  vault=1303.82  [blobs=1301.70 snapshot=  0.20 events= 1.92 other=0.00]  working_db= 49.70
+  docs=  2500  corpus=3522.86  vault=3577.89  [blobs=3524.49 snapshot= 48.56 events= 4.84 other=0.00]  working_db=125.68
+  docs=  5000  corpus=7438.46  vault=8084.03  [blobs=7441.89 snapshot=632.48 events= 9.66 other=0.00]  working_db=246.61
+  docs= 10000  corpus=14258.77  vault=15162.75  [blobs=14265.35 snapshot=878.12 events=19.28 other=0.00]  working_db=448.25
+
+Overhead at full corpus
+-----------------------
+vault/corpus=1.063x  working_db/corpus=0.031x  blobs/corpus=1.000x  snapshot=878.12MiB  events=19746.4KiB

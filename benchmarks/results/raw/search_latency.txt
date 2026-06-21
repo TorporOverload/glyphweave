@@ -1,0 +1,226 @@
+Search Latency vs Corpus Size
+=============================
+
+size=50 dhivehi
+---------------
+median=0.21ms p95=0.35ms mean=0.27ms (n=20)
+
+size=50 filename_prefix
+-----------------------
+median=13.65ms p95=15.89ms mean=15.31ms (n=20)
+
+size=50 negative_dhivehi
+------------------------
+median=0.44ms p95=0.68ms mean=0.46ms (n=160)
+
+size=50 negative_phrase
+-----------------------
+median=0.45ms p95=0.65ms mean=0.48ms (n=60)
+
+size=50 negative_term
+---------------------
+median=0.19ms p95=0.43ms mean=0.25ms (n=180)
+
+size=50 phrase
+--------------
+median=202.34ms p95=220.13ms mean=209.99ms (n=20)
+
+size=50 single_term
+-------------------
+median=228.75ms p95=241.71ms mean=235.00ms (n=20)
+
+size=100 dhivehi
+----------------
+median=0.19ms p95=0.29ms mean=0.24ms (n=20)
+
+size=100 filename_prefix
+------------------------
+median=13.53ms p95=13.97ms mean=13.50ms (n=20)
+
+size=100 negative_dhivehi
+-------------------------
+median=0.45ms p95=0.69ms mean=0.46ms (n=160)
+
+size=100 negative_phrase
+------------------------
+median=0.45ms p95=0.71ms mean=0.50ms (n=60)
+
+size=100 negative_term
+----------------------
+median=0.22ms p95=0.47ms mean=0.26ms (n=180)
+
+size=100 phrase
+---------------
+median=205.65ms p95=213.21ms mean=205.97ms (n=20)
+
+size=100 single_term
+--------------------
+median=230.81ms p95=245.33ms mean=232.41ms (n=20)
+
+size=250 dhivehi
+----------------
+median=0.21ms p95=0.38ms mean=0.26ms (n=20)
+
+size=250 filename_prefix
+------------------------
+median=13.55ms p95=15.15ms mean=13.78ms (n=20)
+
+size=250 negative_dhivehi
+-------------------------
+median=0.43ms p95=0.65ms mean=0.45ms (n=160)
+
+size=250 negative_phrase
+------------------------
+median=0.46ms p95=0.65ms mean=0.48ms (n=60)
+
+size=250 negative_term
+----------------------
+median=0.22ms p95=0.58ms mean=0.29ms (n=180)
+
+size=250 phrase
+---------------
+median=202.15ms p95=207.48ms mean=202.29ms (n=20)
+
+size=250 single_term
+--------------------
+median=230.53ms p95=239.68ms mean=231.41ms (n=20)
+
+size=500 dhivehi
+----------------
+median=0.20ms p95=0.54ms mean=0.27ms (n=20)
+
+size=500 filename_prefix
+------------------------
+median=13.79ms p95=15.03ms mean=13.98ms (n=20)
+
+size=500 negative_dhivehi
+-------------------------
+median=0.46ms p95=0.75ms mean=0.48ms (n=160)
+
+size=500 negative_phrase
+------------------------
+median=0.46ms p95=0.53ms mean=0.46ms (n=60)
+
+size=500 negative_term
+----------------------
+median=0.21ms p95=0.55ms mean=0.28ms (n=180)
+
+size=500 phrase
+---------------
+median=203.89ms p95=208.50ms mean=204.04ms (n=20)
+
+size=500 single_term
+--------------------
+median=228.08ms p95=233.21ms mean=228.87ms (n=20)
+
+size=1000 dhivehi
+-----------------
+median=0.20ms p95=0.37ms mean=0.25ms (n=20)
+
+size=1000 filename_prefix
+-------------------------
+median=13.57ms p95=15.54ms mean=13.86ms (n=20)
+
+size=1000 negative_dhivehi
+--------------------------
+median=0.47ms p95=0.77ms mean=0.49ms (n=160)
+
+size=1000 negative_phrase
+-------------------------
+median=0.47ms p95=0.67ms mean=0.49ms (n=60)
+
+size=1000 negative_term
+-----------------------
+median=0.23ms p95=0.52ms mean=0.27ms (n=180)
+
+size=1000 phrase
+----------------
+median=205.24ms p95=222.14ms mean=207.23ms (n=20)
+
+size=1000 single_term
+---------------------
+median=230.45ms p95=237.29ms mean=230.45ms (n=20)
+
+size=2500 dhivehi
+-----------------
+median=0.21ms p95=0.41ms mean=0.26ms (n=20)
+
+size=2500 filename_prefix
+-------------------------
+median=13.79ms p95=15.24ms mean=13.90ms (n=20)
+
+size=2500 negative_dhivehi
+--------------------------
+median=0.42ms p95=0.70ms mean=0.45ms (n=160)
+
+size=2500 negative_phrase
+-------------------------
+median=0.46ms p95=0.75ms mean=0.50ms (n=60)
+
+size=2500 negative_term
+-----------------------
+median=0.19ms p95=0.38ms mean=0.24ms (n=180)
+
+size=2500 phrase
+----------------
+median=201.41ms p95=204.61ms mean=201.16ms (n=20)
+
+size=2500 single_term
+---------------------
+median=228.47ms p95=232.43ms mean=228.66ms (n=20)
+
+size=5000 dhivehi
+-----------------
+median=0.20ms p95=0.33ms mean=0.25ms (n=20)
+
+size=5000 filename_prefix
+-------------------------
+median=13.33ms p95=17.74ms mean=14.44ms (n=20)
+
+size=5000 negative_dhivehi
+--------------------------
+median=0.49ms p95=0.77ms mean=0.50ms (n=160)
+
+size=5000 negative_phrase
+-------------------------
+median=0.47ms p95=0.72ms mean=0.50ms (n=60)
+
+size=5000 negative_term
+-----------------------
+median=0.21ms p95=0.56ms mean=0.27ms (n=180)
+
+size=5000 phrase
+----------------
+median=201.10ms p95=206.47ms mean=201.30ms (n=20)
+
+size=5000 single_term
+---------------------
+median=228.49ms p95=230.73ms mean=228.32ms (n=20)
+
+size=10000 dhivehi
+------------------
+median=0.18ms p95=0.37ms mean=0.24ms (n=20)
+
+size=10000 filename_prefix
+--------------------------
+median=13.58ms p95=15.14ms mean=13.85ms (n=20)
+
+size=10000 negative_dhivehi
+---------------------------
+median=0.42ms p95=0.61ms mean=0.45ms (n=160)
+
+size=10000 negative_phrase
+--------------------------
+median=0.47ms p95=0.73ms mean=0.50ms (n=60)
+
+size=10000 negative_term
+------------------------
+median=0.19ms p95=0.40ms mean=0.25ms (n=180)
+
+size=10000 phrase
+-----------------
+median=201.74ms p95=210.99ms mean=202.14ms (n=20)
+
+size=10000 single_term
+----------------------
+median=226.99ms p95=242.60ms mean=228.31ms (n=20)
