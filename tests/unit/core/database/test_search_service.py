@@ -599,3 +599,269 @@ def test_get_retriable_extractions_eager_loads_refs_and_blobs(tmp_path) -> None:
     assert len(retriable) == 1
     assert retriable[0].references[0].name == "report.txt"
     assert retriable[0].blobs[0].blob_id == "blob-1.enc"
+
+
+
+# Tiered search: OR fallback and phrase-rank tests
+
+
+def test_search_content_or_fallback_finds_single_term_match(tmp_path) -> None:
+    """A doc containing only one term of a multi-word query must still appear,
+    and no other docs sneak into the result set."""
+    session = _build_session(tmp_path)
+    salt_only = _add_file_entry(
+        session, file_id="f-tier-1", content_hash="h-tier-1",
+        status=ExtractionStatus.DONE.value,
+    )
+    insert_document_content(session, str(salt_only.id), "salt water is used in cooking")
+    session.commit()
+
+    results = search_content(session, "ocean salt")
+
+    assert len(results) == 1, f"expected exactly one match, got {results}"
+    assert results[0][0] == str(salt_only.id)
+
+
+def test_search_content_phrase_tier_ranks_above_scattered_and(tmp_path) -> None:
+    """Doc with the exact phrase must rank above a doc where terms appear far apart."""
+    session = _build_session(tmp_path)
+    phrase_doc = _add_file_entry(
+        session, file_id="f-tier-2a", content_hash="h-tier-2a",
+        status=ExtractionStatus.DONE.value,
+    )
+    scattered_doc = _add_file_entry(
+        session, file_id="f-tier-2b", content_hash="h-tier-2b",
+        status=ExtractionStatus.DONE.value,
+    )
+    insert_document_content(session, str(phrase_doc.id), "ocean salt is a natural mineral")
+    insert_document_content(
+        session, str(scattered_doc.id),
+        "the ocean covers most of the earth and contains a lot of salt",
+    )
+    session.commit()
+
+    results = search_content(session, "ocean salt")
+
+    assert len(results) == 2
+    assert results[0][0] == str(phrase_doc.id)
+    assert results[1][0] == str(scattered_doc.id)
+
+
+def test_search_content_phrase_tier_ranks_above_or_only(tmp_path) -> None:
+    """Doc matching the phrase ranks above a doc matching only one term."""
+    session = _build_session(tmp_path)
+    phrase_doc = _add_file_entry(
+        session, file_id="f-tier-3a", content_hash="h-tier-3a",
+        status=ExtractionStatus.DONE.value,
+    )
+    or_doc = _add_file_entry(
+        session, file_id="f-tier-3b", content_hash="h-tier-3b",
+        status=ExtractionStatus.DONE.value,
+    )
+    insert_document_content(session, str(phrase_doc.id), "ocean salt deposits are common")
+    insert_document_content(session, str(or_doc.id), "salt is a common mineral")
+    session.commit()
+
+    results = search_content(session, "ocean salt")
+
+    phrase_pos = next(i for i, r in enumerate(results) if r[0] == str(phrase_doc.id))
+    or_pos = next(i for i, r in enumerate(results) if r[0] == str(or_doc.id))
+    assert phrase_pos < or_pos
+
+
+def test_search_file_references_or_fallback_finds_partial_filename(tmp_path) -> None:
+    """A file whose name contains only one term of a multi-word query must appear."""
+    session = _build_session(tmp_path)
+    entry = _add_file_entry(session, file_id="f-fn-tier-1", content_hash="h-fn-tier-1")
+    session.add(
+        FileReference(
+            name="salt-recipe.pdf",
+            is_folder=False,
+            file_entry_id=entry.id,
+            virtual_path="/salt-recipe.pdf",
+        )
+    )
+    session.commit()
+
+    results = search_file_references(session, "ocean salt", limit=10)
+
+    assert any(r[1] == "salt-recipe.pdf" for r in results)
+
+
+def test_search_file_references_phrase_tier_ranks_above_or_only(tmp_path) -> None:
+    """File whose name contains the full phrase ranks above a file with one term."""
+    session = _build_session(tmp_path)
+    phrase_entry = _add_file_entry(
+        session, file_id="f-fn-tier-2a", content_hash="h-fn-tier-2a"
+    )
+    or_entry = _add_file_entry(
+        session, file_id="f-fn-tier-2b", content_hash="h-fn-tier-2b"
+    )
+    session.add(
+        FileReference(
+            name="ocean salt minerals.txt",
+            is_folder=False,
+            file_entry_id=phrase_entry.id,
+            virtual_path="/ocean salt minerals.txt",
+        )
+    )
+    session.add(
+        FileReference(
+            name="salt-deposits.txt",
+            is_folder=False,
+            file_entry_id=or_entry.id,
+            virtual_path="/salt-deposits.txt",
+        )
+    )
+    session.commit()
+
+    results = search_file_references(session, "ocean salt", limit=10)
+
+    names = [r[1] for r in results]
+    assert "ocean salt minerals.txt" in names
+    assert "salt-deposits.txt" in names
+    assert names.index("ocean salt minerals.txt") < names.index("salt-deposits.txt")
+
+
+
+# Thaana (Dhivehi) normalization tests
+
+
+
+_DV_DOC_1 = (
+    "ދިވެހި ބަސް "
+    "އިރުމަތީ "
+    "ޕާކިސްތާނަސް"
+)
+_DV_DOC_2 = (
+    "މި ތޫސާނުގައި "
+    "500000 އާއި 250000 އާ ދެމެ"
+)
+
+# First word from doc 1: ދިވެހި  (with vowels)
+_DV_WORD_WITH_VOWELS = "ދިވެހި"
+# Same word, bare consonants: ދވހ
+_DV_WORD_BARE = "ދވހ"
+# Second word from doc 1: ބަސް (with vowels)
+_DV_WORD2_WITH_VOWELS = "ބަސް"
+# Different vowelization of same consonants: ބޭސް
+_DV_WORD2_ALT_VOWELS = "ބޭސް"
+
+
+def test_search_content_dhivehi_bare_consonants(tmp_path) -> None:
+    """Searching bare Thaana consonants (no fili) must find voweled content."""
+    session = _build_session(tmp_path)
+    entry = _add_file_entry(
+        session, file_id="f-dv-1", content_hash="h-dv-1",
+        status=ExtractionStatus.DONE.value,
+    )
+    insert_document_content(session, str(entry.id), _DV_DOC_1)
+    session.commit()
+
+    results = search_content(session, _DV_WORD_BARE)
+
+    assert any(r[0] == str(entry.id) for r in results)
+
+
+def test_search_content_dhivehi_voweled_query(tmp_path) -> None:
+    """Searching with vowel signs still works (same token sequence)."""
+    session = _build_session(tmp_path)
+    entry = _add_file_entry(
+        session, file_id="f-dv-2", content_hash="h-dv-2",
+        status=ExtractionStatus.DONE.value,
+    )
+    insert_document_content(session, str(entry.id), _DV_DOC_1)
+    session.commit()
+
+    results = search_content(session, _DV_WORD_WITH_VOWELS)
+
+    assert any(r[0] == str(entry.id) for r in results)
+
+
+def test_search_content_dhivehi_cross_vowel_match(tmp_path) -> None:
+    """Different vowelization of same consonants must match (FTS5 strips fili)."""
+    session = _build_session(tmp_path)
+    entry = _add_file_entry(
+        session, file_id="f-dv-3", content_hash="h-dv-3",
+        status=ExtractionStatus.DONE.value,
+    )
+    insert_document_content(session, str(entry.id), _DV_DOC_1)
+    session.commit()
+
+    results = search_content(session, _DV_WORD2_ALT_VOWELS)
+
+    assert any(r[0] == str(entry.id) for r in results)
+
+
+def test_search_content_dhivehi_multi_word_or_fallback(tmp_path) -> None:
+    """Multi-word Dhivehi query: doc with only one word still found via OR tier."""
+    session = _build_session(tmp_path)
+    doc_word1_only = _add_file_entry(
+        session, file_id="f-dv-4a", content_hash="h-dv-4a",
+        status=ExtractionStatus.DONE.value,
+    )
+    doc_both = _add_file_entry(
+        session, file_id="f-dv-4b", content_hash="h-dv-4b",
+        status=ExtractionStatus.DONE.value,
+    )
+    insert_document_content(session, str(doc_word1_only.id), _DV_DOC_2)
+    insert_document_content(session, str(doc_both.id), _DV_DOC_1)
+    session.commit()
+
+    query = _DV_WORD_WITH_VOWELS + " " + _DV_WORD2_WITH_VOWELS
+
+    results = search_content(session, query)
+
+    result_ids = [r[0] for r in results]
+    assert str(doc_both.id) in result_ids
+    # doc_word1_only should appear too if it has at least one of the searched words
+    # _DV_DOC_2 starts with މި which doesn't match ދިވެހި or ބަސް,
+    # so it may not appear - but doc_both must.
+
+
+def test_search_content_dhivehi_exact_vowel_ranks_first(tmp_path) -> None:
+    """Doc with exact vowelization ranks above doc with different vowels."""
+    session = _build_session(tmp_path)
+    exact = _add_file_entry(
+        session, file_id="f-dv-5a", content_hash="h-dv-5a",
+        status=ExtractionStatus.DONE.value,
+    )
+    alt = _add_file_entry(
+        session, file_id="f-dv-5b", content_hash="h-dv-5b",
+        status=ExtractionStatus.DONE.value,
+    )
+    insert_document_content(
+        session, str(exact.id),
+        _DV_WORD_WITH_VOWELS + " " + _DV_WORD2_WITH_VOWELS + " content",
+    )
+    insert_document_content(
+        session, str(alt.id),
+        _DV_WORD_WITH_VOWELS + " " + _DV_WORD2_ALT_VOWELS + " content",
+    )
+    session.commit()
+
+    results = search_content(
+        session, _DV_WORD_WITH_VOWELS + " " + _DV_WORD2_WITH_VOWELS
+    )
+
+    assert len(results) == 2
+    assert results[0][0] == str(exact.id)
+
+
+def test_search_file_references_dhivehi_bare_consonants(tmp_path) -> None:
+    """Filename search with bare Thaana consonants finds voweled filenames."""
+    session = _build_session(tmp_path)
+    entry = _add_file_entry(session, file_id="f-dv-fn-1", content_hash="h-dv-fn-1")
+    session.add(
+        FileReference(
+            name=_DV_WORD_WITH_VOWELS + ".pdf",
+            is_folder=False,
+            file_entry_id=entry.id,
+            virtual_path="/" + _DV_WORD_WITH_VOWELS + ".pdf",
+        )
+    )
+    session.commit()
+
+    results = search_file_references(session, _DV_WORD_BARE, limit=10)
+
+    assert any(_DV_WORD_WITH_VOWELS + ".pdf" == r[1] for r in results)

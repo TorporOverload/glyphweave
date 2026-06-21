@@ -372,6 +372,45 @@ def test_restore_conflicted_file_resolves_all_active_conflicts_for_node(
         assert [conflict.status for conflict in conflicts] == ["resolved", "resolved"]
 
 
+def test_restore_conflicted_file_strips_conflict_suffix_from_name(
+    tmp_path: Path,
+) -> None:
+    service, session_factory = _build_folder_service(tmp_path)
+    _seed_suffixed_conflict_file(session_factory)
+    move_events: list[tuple[str, int | None, str]] = []
+
+    class _Emitter:
+        def emit_folder_create(self, folder_ref) -> None:
+            del folder_ref
+
+        def emit_file_conflict_resolved(
+            self,
+            *,
+            conflict_id: str,
+            node_id: str,
+            resolution_status: str,
+            resolution_reason: str,
+        ) -> SimpleNamespace:
+            return SimpleNamespace(event_id=f"{conflict_id}:{resolution_status}")
+
+    service._build_event_emitter = lambda: _Emitter()  # type: ignore[method-assign]
+    service._emit_move_event = (  # type: ignore[method-assign]
+        lambda entry, destination_parent_id, new_name: move_events.append(
+            (entry.node_id, destination_parent_id, new_name)
+        )
+    )
+
+    restored = service.restore_sync_conflict(
+        "conflict-suffixed",
+        destination_folder_virtual_path="/restored",
+    )
+
+    # The archived entry was named "report.pdf.conflict.<wall>.<logical>.<device>";
+    # restoring without an explicit name must recover the real "report.pdf".
+    assert restored.virtual_path == "/restored/report.pdf"
+    assert move_events == [("suffixed-node", restored.parent_id, "report.pdf")]
+
+
 def test_delete_conflicted_folder_escapes_like_wildcards_in_virtual_path(
     tmp_path: Path,
 ) -> None:
@@ -564,6 +603,48 @@ def _seed_conflict_tree(session_factory: sessionmaker) -> tuple[int, int, int]:
         )
         session.flush()
         return conflict_root.id, archived_folder.id, child_file.id
+
+
+def _seed_suffixed_conflict_file(session_factory: sessionmaker) -> None:
+    with session_scope(session_factory) as session:
+        conflict_root = FileReference(
+            node_id="conflict-root",
+            name=".glyphweave_conflicts",
+            is_folder=True,
+            file_entry_id=None,
+        )
+        session.add(conflict_root)
+        session.flush()
+
+        archived_file = FileReference(
+            node_id="suffixed-node",
+            parent=conflict_root,
+            name="report.pdf.conflict.3000.0.device-a",
+            is_folder=False,
+            file_entry_id=None,
+        )
+        session.add(archived_file)
+        session.flush()
+
+        session.add(
+            SyncConflict(
+                conflict_id="conflict-suffixed",
+                node_id="suffixed-node",
+                node_kind="file",
+                archived_file_ref_id=archived_file.id,
+                file_entry_id=None,
+                archived_name=archived_file.name,
+                archived_virtual_path=archived_file.virtual_path,
+                reason_code="deleted_parent_move",
+                reason_text="File archived after parent delete",
+                trigger_event_id="evt-suffixed",
+                trigger_event_hash=None,
+                trigger_event_type="file_move",
+                origin_device_id="device-a",
+                status="active",
+            )
+        )
+        session.flush()
 
 
 def _seed_file_with_multiple_conflicts(session_factory: sessionmaker) -> None:
