@@ -1,6 +1,6 @@
 [project]
 name = "glyphweave"
-version = "0.1.0"
+version = "0.1.001"
 description = "Privacy-focused, local-first document management with zero-knowledge cloud storage"
 readme = "README.md"
 requires-python = ">=3.13"
