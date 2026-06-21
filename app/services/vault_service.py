@@ -104,6 +104,13 @@ class VaultService:
         """Recover vault access using the recovery phrase and set a new password."""
         self.runtime.recover_with_recovery_phrase(recovery_phrase, new_password)
 
+    def verify_recovery_phrase(self, recovery_phrase: str) -> None:
+        """Check the recovery phrase unlocks this vault without resetting the password.
+
+        Raises on an invalid or non-matching phrase; returns ``None`` on success.
+        """
+        self.runtime.verify_recovery_phrase(recovery_phrase)
+
     def list_root_entries(self):
         """Return all top-level entries in the vault."""
         return self.files.list_root_entries()

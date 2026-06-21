@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.services.models import SyncConflictInfo
+from app.services.sync.folder_handlers import original_name
 from app.ui.gui.screens.file_view.models import FileEntry
 from app.ui.gui.setup import TOKENS
 
@@ -179,7 +180,9 @@ class ConflictResolutionDialog(QDialog):
         # Left cluster: warn icon + title + count pill
         warn = QLabel(header)
         warn.setPixmap(
-            tinted_icon("warning", size=16, color=TOKENS.colors.status_error_text).pixmap(16, 16)
+            tinted_icon(
+                "warning", size=16, color=TOKENS.colors.status_error_text
+            ).pixmap(16, 16)
         )
         warn.setFixedSize(QSize(18, 18))
         layout.addWidget(warn, 0, Qt.AlignmentFlag.AlignVCenter)
@@ -313,7 +316,7 @@ class ConflictResolutionDialog(QDialog):
         layout.addWidget(self._list, 1)
 
         return rail
-        
+
     # Tab and list management
 
     def _get_current_conflicts(self) -> list[SyncConflictInfo]:
@@ -367,8 +370,7 @@ class ConflictResolutionDialog(QDialog):
 
         name = QLabel(conflict.archived_name or "(unnamed)", row)
         name.setStyleSheet(
-            'font-family: "IBM Plex Sans"; font-size: 12px;'
-            " color: #2E3440;"
+            'font-family: "IBM Plex Sans"; font-size: 12px; color: #2E3440;'
         )
         name.setMinimumWidth(0)
         top.addWidget(name, 1)
@@ -413,7 +415,6 @@ class ConflictResolutionDialog(QDialog):
         return row
 
     # Selection and action wiring
-
 
     def _on_selection_changed(self) -> None:
         item = self._list.currentItem()
@@ -475,6 +476,7 @@ class ConflictResolutionDialog(QDialog):
             conflict,
             self._entries,
             default_destination=original_parent_path(conflict.archived_virtual_path),
+            default_name=original_name(conflict.archived_name),
             parent=self,
         )
         if overlay.exec() != QDialog.DialogCode.Accepted:

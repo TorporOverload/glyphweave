@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -460,3 +462,19 @@ def get_or_create_conflict_folder(session: Session) -> FileReference:
 
 def conflict_name(name: str, hlc: HybridLogicalClock) -> str:
     return f"{name}.conflict.{hlc.wall_time}.{hlc.logical}.{hlc.device_id}"
+
+
+# Inverse of ``conflict_name``: a trailing ``.conflict.<wall>.<logical>.<device>``
+# suffix, where wall/logical are integers and device is a dot-free id (uuid4).
+_CONFLICT_SUFFIX_RE = re.compile(r"\.conflict\.\d+\.\d+\.[^.]+$")
+
+
+def original_name(archived: str) -> str:
+    """Recover the pre-conflict name from an archived entry name.
+
+    Archiving renames an entry to ``<name>.conflict.<wall>.<logical>.<device>``
+    so restoring it must strip that suffix, otherwise the restored file keeps a
+    bogus extension (e.g. ``report.pdf.conflict.3000.0.<device-id>``). Names that
+    don't carry a recognizable suffix are returned unchanged.
+    """
+    return _CONFLICT_SUFFIX_RE.sub("", archived)

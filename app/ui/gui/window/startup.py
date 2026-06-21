@@ -45,6 +45,9 @@ def wire_screen_signals(window: "GlypheaveGUI") -> None:
     window.lock_screen.unlock_requested.connect(window.handle_unlock)
     window.lock_screen.switch_vault_requested.connect(window.show_vault_list_screen)
     window.recovery_input_screen.back_requested.connect(window.show_vault_list_screen)
+    window.recovery_input_screen.verify_phrase_requested.connect(
+        lambda phrase: routing.handle_recovery_verify(window, phrase)
+    )
     window.recovery_input_screen.recovery_succeeded.connect(
         lambda pw, phrase: routing.handle_recovery_succeeded(window, pw, phrase)
     )

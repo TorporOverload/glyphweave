@@ -209,6 +209,23 @@ class VaultRuntimeService:
             self.context.app_data_dir,
         )
 
+    def verify_recovery_phrase(self, recovery_phrase: str) -> None:
+        """Check that the recovery phrase can unwrap this vault's key.
+
+        Validates the phrase format and attempts the recovery-key unwrap on a
+        throwaway ``KeyService`` without changing the password, unlocking the
+        vault, or mutating any runtime state. Raises ``ValueError`` (or
+        ``FileNotFoundError`` if the vault key is missing) on failure.
+        """
+        vault_path = self.context.require_vault_path()
+        key_path = vault_key_path(vault_path)
+        if not key_path.exists():
+            raise FileNotFoundError(f"vault.key not found at {key_path}")
+
+        key_service = KeyService()
+        key_service.vault_key_file = load_vault_key(key_path)
+        key_service.unwrap_with_recovery_phrase(recovery_phrase)
+
     def _init_services(self) -> None:
         """Bootstrap all runtime services for the currently loaded vault context."""
         bootstrap_runtime_services(self.context)

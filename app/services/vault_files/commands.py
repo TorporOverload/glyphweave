@@ -14,7 +14,8 @@ from app.infrastructure.persistence.db.service.sync_conflict_service import (
     resolve_sync_conflict,
 )
 from app.infrastructure.persistence.db.utils import escape_like_pattern
-from app.services.sync.state import local_resolution_event_id 
+from app.services.sync.folder_handlers import original_name
+from app.services.sync.state import local_resolution_event_id
 
 from .helpers import (
     collapse_descendant_entries,
@@ -256,7 +257,7 @@ def restore_sync_conflict(
     destination_parent_id = service._resolve_or_create_destination_parent_id(
         normalized_destination
     )
-    target_name = new_name or current_name
+    target_name = new_name or original_name(current_name)
     folder_service = service._require_folder_service()
     existing = folder_service.get_child_by_name(destination_parent_id, target_name)
     if existing is not None and existing.id != entry_id:

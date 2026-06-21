@@ -33,6 +33,12 @@ def load_app_icon() -> QIcon:
 def load_icon(name: str) -> QIcon:
     return QIcon(str(ph_icon_path(name)))
 
+def user_manual_path() -> Path | None:
+    """Return the bundled user-manual PDF path, or ``None`` if absent."""
+    path = RESOURCES_DIR[0] / "docs" / "gw-user-manual.pdf"
+    return path if path.exists() else None
+
+
 def get_liscence_text(file_name: str | None) -> str | None:
     if file_name is None:
         return (

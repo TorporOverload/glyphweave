@@ -32,7 +32,7 @@ class MenuBar(QMenuBar):
     find_in_vault_requested = Signal()
     preferences_requested = Signal()
     refresh_requested = Signal()
-    documentation_requested = Signal()
+    user_manual_requested = Signal()
     about_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -108,7 +108,7 @@ class MenuBar(QMenuBar):
         self._add(view_menu, "&Refresh", self.refresh_requested, "F5")
 
         help_menu = self.addMenu("&Help")
-        self._add(help_menu, "&Documentation", self.documentation_requested)
+        self._add(help_menu, "&User Manual", self.user_manual_requested)
         help_menu.addSeparator()
         self._add(help_menu, "&About Glyphweave", self.about_requested)
 

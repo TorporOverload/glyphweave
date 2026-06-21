@@ -150,6 +150,33 @@ def handle_unlock(window: "GlypheaveGUI", passphrase: str) -> None:
     )
 
 
+def handle_recovery_verify(window: "GlypheaveGUI", recovery_phrase: str) -> None:
+    """Validate the recovery key against the vault before letting the user set a
+    new password. On success the screen advances to the password step; on
+    failure the error is shown on step 1 and the user stays put."""
+    words = recovery_phrase.split()
+
+    def task() -> None:
+        window.service.verify_recovery_phrase(" ".join(words))
+
+    def _on_success(_result: object) -> None:
+        window.recovery_input_screen.advance_to_password_step()
+
+    def _on_error(_message: str) -> None:
+        # The underlying crypto error is logged by the task runner. Surface a
+        # single, user-facing message rather than internal phrasing
+        window.recovery_input_screen.show_error(
+            "That recovery key is incorrect. Check each word and try again."
+        )
+
+    window._run_task(
+        task,
+        on_success=_on_success,
+        on_error=_on_error,
+        error_title="Recovery key verification failed",
+    )
+
+
 def handle_recovery_succeeded(
     window: "GlypheaveGUI",
     new_password: str,
@@ -164,7 +191,7 @@ def handle_recovery_succeeded(
     words = recovery_phrase.split()
 
     def task() -> None:
-        window.service.recover_vault(words, new_password)
+        window.service.recover_with_recovery_phrase(" ".join(words), new_password)
 
     def _on_success(_result: object) -> None:
         # Drop the recovery-input form contents before navigating back to
@@ -380,7 +407,7 @@ def handle_lock_request(window: "GlypheaveGUI") -> None:
             ),
         ):
             return
-        window.app_shell.lock_all_unlocked()
+
     window.app_shell.clear()
     vault_path = window.service.vault_path
     vault_name = window.service.vault_name or ""

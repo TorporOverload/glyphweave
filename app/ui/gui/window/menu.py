@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QDesktopServices
+
+from ..setup.resources import user_manual_path
+
 if TYPE_CHECKING:
     from ..glyphweave_ui import GlypheaveGUI
 
@@ -16,14 +21,14 @@ def wire_menu_bar(window: "GlypheaveGUI") -> None:
     m.export_requested.connect(lambda: menu_export_selected(window))
     m.exit_requested.connect(window.close)
     m.lock_requested.connect(window._handle_lock_request)
-    m.sync_now_requested.connect(lambda: menu_sync_now_stub(window))
+    m.sync_now_requested.connect(lambda: menu_sync_now(window))
     m.recovery_phrase_requested.connect(
         lambda: menu_recovery_phrase_stub(window)
     )
     m.find_in_vault_requested.connect(lambda: menu_find_in_vault(window))
     m.preferences_requested.connect(lambda: menu_preferences_stub(window))
     m.refresh_requested.connect(lambda: menu_refresh(window))
-    m.documentation_requested.connect(lambda: menu_documentation_stub(window))
+    m.user_manual_requested.connect(lambda: menu_open_user_manual(window))
     m.about_requested.connect(window._show_about_modal)
 
 
@@ -50,8 +55,11 @@ def menu_refresh(window: "GlypheaveGUI") -> None:
         window.refresh_file_view()
 
 
-def menu_sync_now_stub(window: "GlypheaveGUI") -> None:
-    window.add_toast("info", "Sync is not yet implemented in this build.")
+def menu_sync_now(window: "GlypheaveGUI") -> None:
+    # Sync is only reachable post-unlock (the menu action is disabled while
+    # locked). Delegate to the same handler the breadcrumbs sync button uses.
+    if hasattr(window, "app_shell"):
+        window.app_shell.start_sync()
 
 
 def menu_recovery_phrase_stub(window: "GlypheaveGUI") -> None:
@@ -74,8 +82,13 @@ def menu_preferences_stub(window: "GlypheaveGUI") -> None:
     window.add_toast("info", "Preferences are not yet implemented.")
 
 
-def menu_documentation_stub(window: "GlypheaveGUI") -> None:
-    window.add_toast("info", "Documentation links are not yet set.")
+def menu_open_user_manual(window: "GlypheaveGUI") -> None:
+    path = user_manual_path()
+    if path is None:
+        window.add_toast("error", "User manual is not bundled with this build.")
+        return
+    if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))):
+        window.add_toast("error", "Could not open the user manual.")
 
 # Cut / Copy / Paste (right-click menu)
 

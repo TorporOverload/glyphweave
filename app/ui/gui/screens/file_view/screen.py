@@ -1,9 +1,5 @@
 """Main file-view screen - composition root for the inner content area
-(action toolbar + file table + inspector). The chrome (TopBar / breadcrumbs
-/ sidebar / footer) lives in :class:`AppShell`. This class wires the child
-widgets together; the heavy lifting lives in the ``_build`` / ``_table`` /
-``_tree`` / ``_inspector`` / ``_actions`` helper modules so this file stays
-under the per-file line cap."""
+(action toolbar + file table + inspector)."""
 
 from __future__ import annotations
 
@@ -178,7 +174,9 @@ class FileViewScreen(QWidget):
         return self._clipboard
 
     def get_selected_paths(self) -> list[str]:
-        return list(getattr(self, "_selected_paths", []) or [])
+        # Mirrors the toolbar/right-click Export path so the File -> Export
+        # menu and Ctrl+E act on the live table selection.
+        return self._selected_table_paths()
 
     def lock_all_unlocked(self) -> None:
         for entry in self._unlocked_entries:

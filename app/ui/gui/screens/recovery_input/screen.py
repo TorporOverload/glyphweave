@@ -28,6 +28,10 @@ Signals
 ``back_requested``
     Emitted when the user clicks Back on step 1 (i.e. wants to leave the
     recovery flow entirely).
+``verify_phrase_requested(passphrase)``
+    Emitted when the user clicks "Verify recovery key" on step 1. The caller
+    validates the phrase against the vault and either calls
+    ``advance_to_password_step`` on success or ``show_error`` on failure.
 ``recovery_succeeded(new_password, passphrase)``
     Emitted after step 2 is submitted with the validated new password and
     the space-joined 24-word passphrase from step 1.  The caller is
@@ -80,6 +84,7 @@ class RecoveryInputScreen(QWidget):
     """
 
     back_requested = Signal()
+    verify_phrase_requested = Signal(str)  # passphrase
     recovery_succeeded = Signal(str, str)  # (new_password, passphrase)
 
     # Modal dimensions per step. Step 1's 6×4 word grid wants width and
@@ -129,7 +134,7 @@ class RecoveryInputScreen(QWidget):
         self._stack = QStackedWidget(self.modal)
 
         self._step1 = RecoveryStep1Page(self._stack)
-        self._step1.verify_requested.connect(lambda: self._goto_step(2))
+        self._step1.verify_requested.connect(self._on_step1_verify)
         self._stack.addWidget(self._step1)
 
         self._step2 = RecoveryStep2Page(self._stack)
@@ -217,13 +222,28 @@ class RecoveryInputScreen(QWidget):
             return
         self.back_requested.emit()
 
+    def _on_step1_verify(self) -> None:
+        # Don't advance yet - ask the controller to verify the recovery key
+        # against the vault first. ``advance_to_password_step`` is called back
+        # on success; ``show_error`` on failure.
+        self.set_loading(True)
+        self.clear_error()
+        words = " ".join(self._step1.words())
+        self.verify_phrase_requested.emit(words)
+
     def _on_step2_submit(self, new_password: str) -> None:
         self.set_loading(True)
         words = " ".join(self._step1.words())
         self.recovery_succeeded.emit(new_password, words)
 
     # Public API
-    
+
+    def advance_to_password_step(self) -> None:
+        """Move to the new-password step. Called by the controller once the
+        recovery key has been verified against the vault."""
+        self.set_loading(False)
+        self._goto_step(2)
+
     def set_vault_info(self, name: str, path: str) -> None:
         self._vault_name = name
         self._vault_path = path
