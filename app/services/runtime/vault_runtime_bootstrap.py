@@ -1,25 +1,26 @@
 from __future__ import annotations
 
-from app.infrastructure.crypto.service.encryption_service import EncryptionService
+import threading
+
 from app.common.logging import logger
+from app.common.paths.runtime_layout import runtime_cache_dir
+from app.infrastructure.crypto.service.encryption_service import EncryptionService
+from app.infrastructure.fuse.fuse_orchestrator import FuseOrchestrator
 from app.infrastructure.persistence.db.base import DbBase
-from app.infrastructure.persistence.db.service.search import get_retriable_extractions
 from app.infrastructure.persistence.db.service.file_service import FileService
 from app.infrastructure.persistence.db.service.folder_service import FolderService
+from app.infrastructure.persistence.db.service.search import get_retriable_extractions
 from app.infrastructure.persistence.db.service.session import session_scope
-from app.infrastructure.fuse.fuse_orchestrator import FuseOrchestrator
-from app.common.paths.runtime_layout import runtime_cache_dir
 from app.infrastructure.persistence.db_dump_service import (
     install_db_dump_hook,
     restore_latest_db_dump,
 )
 from app.services.content.extraction_service import ExtractionService
 from app.services.content.indexing_service import IndexingService
+from app.services.models import VaultContext
 from app.services.runtime.event_store_factory import build_event_store
 from app.services.sync.replay import replay_vault_events
 from app.services.sync.runtime import EventReplayRuntime
-
-from app.services.models import VaultContext
 
 
 def bootstrap_runtime_services(context: VaultContext) -> None:
@@ -101,6 +102,11 @@ def bootstrap_runtime_services(context: VaultContext) -> None:
 
 
 def _index_replayed_entries(context: VaultContext) -> None:
+    """Schedule indexing of replayed entries in a background thread.
+
+    This prevents blocking the UI thread while text extraction and indexing
+    operations are performed on potentially large files.
+    """
     local_data_path = context.local_data_path
     if (
         context.session_factory is None
@@ -112,22 +118,51 @@ def _index_replayed_entries(context: VaultContext) -> None:
     ):
         return
 
-    indexing_service = IndexingService(
-        session_factory=context.session_factory,
-        encryption_service=context.encryption_service,
-        vault_path=context.vault_path,
-        cache_dir=runtime_cache_dir(local_data_path),
-        master_key=context.master_key.view(),
-        vault_id=context.vault_id,
+    # Start indexing in a background thread to avoid blocking the main thread
+    thread = threading.Thread(
+        target=_run_indexing_in_background,
+        args=(
+            context.session_factory,
+            context.encryption_service,
+            context.vault_path,
+            local_data_path,
+            context.master_key.view(),
+            context.vault_id,
+        ),
+        daemon=True,
+        name="GlyphweaveIndexing",
     )
-    with session_scope(context.session_factory, commit=False) as session:
-        entries = get_retriable_extractions(session, limit=500)
+    thread.start()
 
-    for entry in entries:
-        filename = _select_supported_reference_name(entry)
-        if filename is None:
-            continue
-        indexing_service.index_file_entry(entry, filename)
+
+def _run_indexing_in_background(
+    session_factory,
+    encryption_service,
+    vault_path,
+    local_data_path,
+    master_key,
+    vault_id,
+) -> None:
+    """Run indexing operations in a background thread."""
+    try:
+        indexing_service = IndexingService(
+            session_factory=session_factory,
+            encryption_service=encryption_service,
+            vault_path=vault_path,
+            cache_dir=runtime_cache_dir(local_data_path),
+            master_key=master_key,
+            vault_id=vault_id,
+        )
+        with session_scope(session_factory, commit=False) as session:
+            entries = get_retriable_extractions(session, limit=500)
+
+        for entry in entries:
+            filename = _select_supported_reference_name(entry)
+            if filename is None:
+                continue
+            indexing_service.index_file_entry(entry, filename)
+    except Exception:
+        logger.exception("Background indexing failed")
 
 
 def _select_supported_reference_name(entry) -> str | None:

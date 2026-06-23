@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from app.common.config import (
     ensure_app_data_layout,
     get_app_data_dir,
 )
+from app.common.logging import logger
 from app.common.paths.vault_layout import metadata_path
 
 
@@ -43,7 +45,11 @@ def upsert_registry(
     app_data_dir: Path | None = None,
 ) -> None:
     """Insert or update a vault entry in the registry."""
+    start = time.time()
+    t1 = time.time()
     entries = load_registry(app_data_dir)
+    logger.debug(f"load_registry took {time.time() - t1:.2f}s")
+
     now = datetime.now(timezone.utc).isoformat()
 
     for entry in entries:
@@ -51,7 +57,10 @@ def upsert_registry(
             entry["vault_alias"] = vault_alias
             entry["path"] = vault_path
             entry["last_opened"] = now
+            t2 = time.time()
             save_registry(entries, app_data_dir)
+            logger.debug(f"save_registry took {time.time() - t2:.2f}s (update)")
+            logger.debug(f"Total upsert_registry took {time.time() - start:.2f}s")
             return
 
     entries.append(
@@ -62,7 +71,10 @@ def upsert_registry(
             "last_opened": now,
         }
     )
+    t3 = time.time()
     save_registry(entries, app_data_dir)
+    logger.debug(f"save_registry took {time.time() - t3:.2f}s (insert)")
+    logger.debug(f"Total upsert_registry took {time.time() - start:.2f}s")
 
 
 def remove_registry_entry(vault_id: str, app_data_dir: Path | None = None) -> bool:

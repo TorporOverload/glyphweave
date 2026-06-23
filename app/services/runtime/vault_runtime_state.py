@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
-from app.infrastructure.crypto.service.key_service import KeyService
+from app.common.logging import logger
 from app.common.paths.runtime_layout import (
     decrypted_files_dir,
     fuse_mounts_dir,
@@ -11,7 +12,7 @@ from app.common.paths.runtime_layout import (
     runtime_cache_dir,
     wal_temp_blobs_dir,
 )
-
+from app.infrastructure.crypto.service.key_service import KeyService
 from app.infrastructure.persistence.registry_service import read_vault_metadata
 from app.services.models import VaultContext
 
@@ -48,10 +49,16 @@ def prepare_existing_vault_context(
     fallback_vault_id: str | None = None,
 ) -> None:
     """Read vault metadata from disk and populate the context with location details."""
+    start = time.time()
+    t1 = time.time()
     if not vault_path.exists() or not vault_path.is_dir():
         raise FileNotFoundError(f"Vault path not found: {vault_path}")
+    logger.debug(f"vault_path.exists/is_dir check took {time.time() - t1:.2f}s")
 
+    t2 = time.time()
     metadata = read_vault_metadata(vault_path)
+    logger.debug(f"read_vault_metadata took {time.time() - t2:.2f}s")
+
     vault_id = metadata.get("vault_id") or fallback_vault_id
     if not vault_id:
         raise ValueError("Vault metadata is missing vault_id")
@@ -61,6 +68,9 @@ def prepare_existing_vault_context(
         vault_path=vault_path,
         vault_id=vault_id,
         vault_name=metadata.get("name") or fallback_alias or vault_path.name,
+    )
+    logger.debug(
+        f"Total prepare_existing_vault_context took {time.time() - start:.2f}s"
     )
 
 

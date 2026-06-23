@@ -16,9 +16,7 @@ if TYPE_CHECKING:
     from ..glyphweave_ui import GlypheaveGUI
 
 
-def _resolve_file_name(
-    window: "GlypheaveGUI", file_ref_id: int
-) -> str:
+def _resolve_file_name(window: "GlypheaveGUI", file_ref_id: int) -> str:
     """Look up a display name for the given file_ref_id from either the
     main file list or the unlocked-file list. Returns ``""`` if not found."""
     if not hasattr(window, "file_view"):
@@ -31,9 +29,7 @@ def _resolve_file_name(
     return unlocked.name if unlocked else ""
 
 
-def open_file_from_view(
-    window: "GlypheaveGUI", file_ref_id: int
-) -> None:
+def open_file_from_view(window: "GlypheaveGUI", file_ref_id: int) -> None:
     name = _resolve_file_name(window, file_ref_id)
 
     def _before() -> None:
@@ -52,9 +48,7 @@ def open_file_from_view(
     )
 
 
-def reopen_unlocked_file(
-    window: "GlypheaveGUI", file_ref_id: int
-) -> None:
+def reopen_unlocked_file(window: "GlypheaveGUI", file_ref_id: int) -> None:
     name = _resolve_file_name(window, file_ref_id)
 
     def _before() -> None:
@@ -73,9 +67,7 @@ def reopen_unlocked_file(
     )
 
 
-def lock_unlocked_file(
-    window: "GlypheaveGUI", file_ref_id: int
-) -> None:
+def lock_unlocked_file(window: "GlypheaveGUI", file_ref_id: int) -> None:
     # Surface the file name in the toast when available.
     name = ""
     if hasattr(window, "file_view"):
@@ -97,12 +89,11 @@ def lock_unlocked_file(
         ),
         on_error=_on_error,
         error_title="Lock failed",
-        before=lambda: window.file_view.set_file_pending(
-            file_ref_id, True, "Locking"
-        ),
+        before=lambda: window.file_view.set_file_pending(file_ref_id, True, "Locking"),
         after=lambda: window.file_view.set_file_pending(file_ref_id, False),
         block_ui=False,
     )
+
     # Safety-net poll: rebuild the unlocked panel from the service in case
     # the task's on_success path doesn't update the UI correctly. Guard
     # against firing during shutdown so we don't poke a torn-down window.
@@ -118,9 +109,7 @@ def import_into_vault(
     paths: object,
     destination_folder_virtual_path: str,
 ) -> None:
-    import_paths = (
-        [str(path) for path in paths] if isinstance(paths, list) else []
-    )
+    import_paths = [str(path) for path in paths] if isinstance(paths, list) else []
     if not import_paths:
         selected_files, _ = QFileDialog.getOpenFileNames(
             window,
@@ -130,6 +119,11 @@ def import_into_vault(
         import_paths = selected_files
     if not import_paths:
         return
+
+    def _on_error(msg: str) -> None:
+        window.app_shell.hide_importing_status()
+        window.add_toast("error", f"Import failed: {msg}")
+
     window._run_task(
         lambda: _tasks.import_and_refresh(
             window, import_paths, destination_folder_virtual_path
@@ -137,22 +131,15 @@ def import_into_vault(
         on_success=lambda payload: window._handle_file_view_loaded(
             payload, show_screen=False
         ),
-        on_error=lambda msg: (
-            window.app_shell.hide_importing_status(),
-            window.add_toast("error", f"Import failed: {msg}"),
-        ),
+        on_error=_on_error,
         before=lambda: window.app_shell.show_importing_status("Importing…"),
         after=window.app_shell.hide_importing_status,
         block_ui=False,
     )
 
 
-def delete_selected_entries(
-    window: "GlypheaveGUI", paths: object
-) -> None:
-    selected_paths = (
-        [str(path) for path in paths] if isinstance(paths, list) else []
-    )
+def delete_selected_entries(window: "GlypheaveGUI", paths: object) -> None:
+    selected_paths = [str(path) for path in paths] if isinstance(paths, list) else []
     if not selected_paths:
         return
     item_label = "item" if len(selected_paths) == 1 else "items"
@@ -163,6 +150,7 @@ def delete_selected_entries(
     )
     if choice != QMessageBox.StandardButton.Yes:
         return
+
     window._run_task(
         lambda: _tasks.delete_and_refresh(window, selected_paths),
         on_success=lambda payload: window._handle_file_view_loaded(
@@ -195,12 +183,8 @@ def create_folder_in_vault(
     )
 
 
-def export_selected_entries(
-    window: "GlypheaveGUI", paths: object
-) -> None:
-    selected_paths = (
-        [str(path) for path in paths] if isinstance(paths, list) else []
-    )
+def export_selected_entries(window: "GlypheaveGUI", paths: object) -> None:
+    selected_paths = [str(path) for path in paths] if isinstance(paths, list) else []
     if not selected_paths:
         return
     destination = QFileDialog.getExistingDirectory(
@@ -208,6 +192,7 @@ def export_selected_entries(
     )
     if not destination:
         return
+
     def _on_success(exported: object) -> None:
         files = exported if isinstance(exported, list) else []
         if len(files) == 1:
@@ -215,25 +200,19 @@ def export_selected_entries(
                 "success", f"Exported {Path(files[0]).name} to {destination}"
             )
         elif len(files) > 1:
-            window.add_toast(
-                "success", f"Exported {len(files)} files to {destination}"
-            )
+            window.add_toast("success", f"Exported {len(files)} files to {destination}")
         else:
             window.add_toast("success", f"Exported to {destination}")
 
     window._run_task(
-        lambda: _tasks.export_entries(
-            window, selected_paths, Path(destination)
-        ),
+        lambda: _tasks.export_entries(window, selected_paths, Path(destination)),
         on_success=_on_success,
         error_title="Export failed",
         block_ui=False,
     )
 
 
-def rename_entry(
-    window: "GlypheaveGUI", virtual_path: str, new_name: str
-) -> None:
+def rename_entry(window: "GlypheaveGUI", virtual_path: str, new_name: str) -> None:
     def task():
         window.service.rename_entry(virtual_path, new_name)
 
@@ -245,9 +224,7 @@ def rename_entry(
     )
 
 
-def move_entries(
-    window: "GlypheaveGUI", payload: tuple[list[str], str]
-) -> None:
+def move_entries(window: "GlypheaveGUI", payload: tuple[list[str], str]) -> None:
     source_virtual_paths, destination_folder_virtual_path = payload
 
     def task():
@@ -273,4 +250,5 @@ def import_existing_vault(window: "GlypheaveGUI") -> None:
         lambda: _tasks.import_and_prepare(window, Path(selected)),
         on_success=window._handle_prepared_vault,
         error_title="Import failed",
+        block_ui=False,
     )

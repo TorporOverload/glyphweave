@@ -3,7 +3,7 @@
 
 #define MyAppName "Glyphweave"
 ; CI overrides this via /DMyAppVersion=<tag> - this value is only used for local builds.
-#define MyAppVersion "0.1.001"
+#define MyAppVersion "0.1.100"
 #define MyAppPublisher "torporoverload"
 #define MyAppURL "https://github.com/TorporOverload/glyphweave"
 #define MyAppExeName "glyphweave.exe"

@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 
 from app.ui.gui.setup.resources import RESOURCES_DIR, get_liscence_text
 
-APP_VERSION = "0.1.001"
+APP_VERSION = "0.1.100"
 RELEASES_URL = "https://github.com/TorporOverload/glyphweave/releases"
 
 

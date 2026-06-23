@@ -6,13 +6,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import metadata as _meta
 from ..gui_utils import (
     CreatedVaultResult,
     FileViewPayload,
     PreparedVaultResult,
 )
 from ..screens import VaultListEntry
+from . import metadata as _meta
 
 if TYPE_CHECKING:
     from ..glyphweave_ui import GlypheaveGUI
@@ -35,18 +35,14 @@ def create_vault(
     vault_name: str,
     password: str,
 ) -> CreatedVaultResult:
-    recovery_phrase = window.service.create_new_vault(
-        vault_path, vault_name, password
-    )
+    recovery_phrase = window.service.create_new_vault(vault_path, vault_name, password)
     return CreatedVaultResult(
         vault_id=str(window.service.context.vault_id or ""),
         recovery_words=recovery_phrase.split(),
     )
 
 
-def prepare_vault(
-    window: "GlypheaveGUI", entry: VaultListEntry
-) -> PreparedVaultResult:
+def prepare_vault(window: "GlypheaveGUI", entry: VaultListEntry) -> PreparedVaultResult:
     window.service.prepare_existing_vault(
         Path(entry.path),
         fallback_alias=entry.name,
@@ -57,18 +53,14 @@ def prepare_vault(
     )
 
 
-def import_and_prepare(
-    window: "GlypheaveGUI", vault_path: Path
-) -> PreparedVaultResult:
+def import_and_prepare(window: "GlypheaveGUI", vault_path: Path) -> PreparedVaultResult:
+    """Import a vault and prepare its context for use."""
     imported = window.service.import_vault(vault_path)
     imported_id = str(imported["vault_id"])
     imported_name = str(imported.get("vault_alias") or vault_path.name)
     imported_path = str(imported.get("path") or vault_path)
-    window.service.prepare_existing_vault(
-        Path(imported_path),
-        fallback_alias=imported_name,
-        fallback_vault_id=imported_id,
-    )
+    # Note: import_vault already calls prepare_existing_vault internally,
+    # so we don't need to call it again here
     return PreparedVaultResult(
         vault_id=imported_id,
         name=imported_name,
@@ -76,9 +68,7 @@ def import_and_prepare(
     )
 
 
-def unlock_and_load(
-    window: "GlypheaveGUI", passphrase: str
-) -> FileViewPayload:
+def unlock_and_load(window: "GlypheaveGUI", passphrase: str) -> FileViewPayload:
     window.service.open_existing_vault(passphrase)
     return _meta.build_file_view_payload(window)
 
@@ -87,23 +77,17 @@ def load_file_view_payload(window: "GlypheaveGUI") -> FileViewPayload:
     return _meta.build_file_view_payload(window)
 
 
-def open_and_refresh(
-    window: "GlypheaveGUI", file_ref_id: int
-) -> FileViewPayload:
+def open_and_refresh(window: "GlypheaveGUI", file_ref_id: int) -> FileViewPayload:
     window.service.open_file_by_ref(file_ref_id)
     return _meta.build_file_view_payload(window)
 
 
-def reopen_and_refresh(
-    window: "GlypheaveGUI", file_ref_id: int
-) -> FileViewPayload:
+def reopen_and_refresh(window: "GlypheaveGUI", file_ref_id: int) -> FileViewPayload:
     window.service.reopen_unlocked(file_ref_id)
     return _meta.build_file_view_payload(window)
 
 
-def lock_and_refresh(
-    window: "GlypheaveGUI", file_ref_id: int
-) -> FileViewPayload:
+def lock_and_refresh(window: "GlypheaveGUI", file_ref_id: int) -> FileViewPayload:
     window.service.unmount_unlocked(file_ref_id)
     return _meta.build_file_view_payload(window)
 
@@ -127,14 +111,9 @@ def import_and_refresh(
     total = len(expand_jobs)
     for index, (source_path, target_parent) in enumerate(expand_jobs):
         window._task_progress.emit(index + 1, total, source_path.name)
-        window.service.add_file(
-            source_path, dest_parent_virtual_path=target_parent
-        )
+        window.service.add_file(source_path, dest_parent_virtual_path=target_parent)
         completed = index + 1
-        if (
-            completed % _IMPORT_REFRESH_EVERY == 0
-            and completed != total
-        ):
+        if completed % _IMPORT_REFRESH_EVERY == 0 and completed != total:
             window._task_intermediate_refresh.emit(
                 _meta.build_file_view_payload(window)
             )
@@ -178,6 +157,4 @@ def export_entries(
     source_virtual_paths: list[str],
     destination_dir: Path,
 ) -> list[Path]:
-    return list(
-        window.service.export_entries(source_virtual_paths, destination_dir)
-    )
+    return list(window.service.export_entries(source_virtual_paths, destination_dir))

@@ -1,18 +1,19 @@
 from __future__ import annotations
 
 import shutil
+import time
 import uuid
 from pathlib import Path
 
-from app.infrastructure.crypto.service.key_service import KeyService
-from app.infrastructure.crypto.service.utils import load_vault_key, save_vault_key
-from app.infrastructure.crypto.types import KDFParams, VaultKeyFile, WrappedKey
+from app.common.logging import logger
 from app.common.paths.vault_layout import (
     create_vault_layout,
     metadata_path,
     vault_key_path,
 )
-
+from app.infrastructure.crypto.service.key_service import KeyService
+from app.infrastructure.crypto.service.utils import load_vault_key, save_vault_key
+from app.infrastructure.crypto.types import KDFParams, VaultKeyFile, WrappedKey
 from app.infrastructure.persistence.registry_service import (
     load_registry,
     remove_registry_entry,
@@ -20,6 +21,7 @@ from app.infrastructure.persistence.registry_service import (
     write_vault_metadata,
 )
 from app.services.models import VaultContext
+
 from .vault_runtime_bootstrap import bootstrap_runtime_services
 from .vault_runtime_state import (
     assign_vault_location,
@@ -66,15 +68,28 @@ class VaultRuntimeService:
         fallback_vault_id: str | None = None,
     ) -> dict[str, str]:
         """Register an existing vault that is not yet present in the local registry."""
+        start = time.time()
+        logger.debug(f"Starting vault import for {vault_path}")
+
+        t1 = time.time()
         self.prepare_existing_vault(vault_path, fallback_alias, fallback_vault_id)
+        logger.debug(f"prepare_existing_vault took {time.time() - t1:.2f}s")
+
+        t2 = time.time()
         vault_id = self.context.require_vault_id()
         vault_name = self.context.vault_name or fallback_alias or vault_path.name
+        logger.debug(f"vault_id/name lookup took {time.time() - t2:.2f}s")
+
+        t3 = time.time()
         upsert_registry(
             vault_id,
             vault_name,
             str(vault_path),
             self.context.app_data_dir,
         )
+        logger.debug(f"upsert_registry took {time.time() - t3:.2f}s")
+
+        logger.debug(f"Total import_vault time: {time.time() - start:.2f}s")
         return {
             "vault_id": vault_id,
             "vault_alias": vault_name,
