@@ -30,6 +30,15 @@ test target='' output='0':
     uv run -m pytest -q $pytest_tmp {{target}} \
     }
 
+build:
+    New-Item -ItemType Directory -Force -Path redist | Out-Null; \
+    gh release download --repo winfsp/winfsp --pattern "winfsp-*.msi" --dir redist; \
+    Get-ChildItem redist\*.msi | Select-Object -First 1 | Rename-Item -NewName "winfsp.msi" -Force; \
+    uv sync --all-groups; \
+    uv run pyinstaller glyphweave.spec; \
+    & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss; \
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 bench *args:
     uv run python -m benchmarks.run_all {{args}}
 
